@@ -913,7 +913,12 @@ def main() -> int:
         return subprocess.run([str(ctx.emar), *rest]).returncode
     if tool == "ranlib":
         ctx = ToolchainContext()
-        return subprocess.run([str(ctx.emranlib), *rest]).returncode
+        # OpenBSD ranlib(1) accepts `-t` (used by GNU libtool `--mode=install` on
+        # `*-*-openbsd*`); filter `-t` for `llvm-ranlib`/`emranlib` compatibility.
+        filtered = [a for a in rest if a != "-t"]
+        if not filtered:
+            return 0
+        return subprocess.run([str(ctx.emranlib), *filtered]).returncode
     if tool == "nm":
         ctx = ToolchainContext()
         return subprocess.run([str(ctx.llvm_nm), *rest]).returncode
