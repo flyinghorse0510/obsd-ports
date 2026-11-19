@@ -28,6 +28,7 @@ import base64
 import binascii
 import hashlib
 import json
+import lzma
 import os
 import pathlib
 import platform
@@ -35,21 +36,24 @@ import re
 import shlex
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tarfile
+import tempfile
 import tomllib
 import urllib.request
 import zipfile
+import zlib
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 DISTINFO_SHA256_RE = re.compile(r"^SHA256\s*\((.+)\)\s*=\s*(\S+)\s*$")
 DISTINFO_SIZE_RE = re.compile(r"^SIZE\s*\((.+)\)\s*=\s*(\d+)\s*$")
-VAR_ASSIGN_RE = re.compile(r"^([A-Za-z0-9_.+-]+)\s*([+?:!]?=)\s*(.*)$")
+VAR_ASSIGN_RE = re.compile(r"^([A-Za-z0-9_.+-]+?)\s*([+?:!]?=)\s*(.*)$")
 SIMPLE_VAR_RE = re.compile(
-    r"\$\{([A-Za-z0-9_.+-]+)(?::=([^}]*))?(?::([R]))?\}|\$\(([A-Za-z0-9_.+-]+)\)|\$([A-Za-z0-9_])"
+    r"\$\{([A-Za-z0-9_.+-]+)(?::=([^}]*))?(?::([RL]))?\}|\$\(([A-Za-z0-9_.+-]+)\)|\$([A-Za-z0-9_])"
 )
 
 
@@ -166,6 +170,21 @@ def parse_openbsd_makefile_vars(paths: Sequence[pathlib.Path]) -> Dict[str, str]
                 for idx in range(0, len(toks) - 1, 2):
                     if not toks[idx].startswith("#"):
                         env[f"LIB{toks[idx]}_VERSION"] = toks[idx + 1]
+
+    # Synthesize default DISTNAME from GH_* or DIST_TUPLE when omitted (matching bsd.port.mk / dist-tuple.port.mk)
+    if "DISTNAME" not in env:
+        if "GH_PROJECT" in env and ("GH_TAGNAME" in env or "GH_COMMIT" in env):
+            proj = expand_openbsd_expr(env.get("GH_PROJECT", ""), env).strip()
+            tag = expand_openbsd_expr(env.get("GH_TAGNAME", ""), env).strip()
+            if proj and tag:
+                ver_part = tag[1:] if (len(tag) > 1 and tag[0] in ("v", "V") and tag[1].isdigit()) else tag
+                env["DISTNAME"] = f"{proj}-{ver_part}"
+        elif "DIST_TUPLE" in env:
+            dt = expand_openbsd_expr(env["DIST_TUPLE"], env).split()
+            if len(dt) >= 5:
+                _tmpl, _acct, proj, ref, _sub = dt[0], dt[1], dt[2], dt[3], dt[4]
+                ver_part = ref[1:] if (len(ref) > 1 and ref[0] in ("v", "V") and ref[1].isdigit()) else ref
+                env["DISTNAME"] = f"{proj}-{ver_part}"
     return env
 
 
@@ -176,10 +195,12 @@ def expand_openbsd_expr(expr: str, env: Dict[str, str], depth: int = 0) -> str:
     def repl(m: re.Match) -> str:
         name = m.group(1) or m.group(4) or m.group(5) or ""
         suffix_append = m.group(2)
-        mod_r = m.group(3)
+        mod = m.group(3)
         base_val = expand_openbsd_expr(env.get(name, ""), env, depth + 1)
-        if mod_r == "R":
+        if mod == "R":
             return base_val.rsplit(".", 1)[0] if "." in base_val else base_val
+        if mod == "L":
+            return base_val.lower()
         if suffix_append is not None:
             sub = expand_openbsd_expr(suffix_append, env, depth + 1)
             toks = base_val.split()
@@ -218,6 +239,14 @@ def resolve_distfile_urls(
         sites_raw.append(f"https://github.com/{gh_acct}/{gh_proj}/archive/{ref}/")
         if gh_tag:
             sites_raw.append(f"https://github.com/{gh_acct}/{gh_proj}/releases/download/{gh_tag}/")
+
+    if "DIST_TUPLE" in env:
+        dt_toks = expand_openbsd_expr(env["DIST_TUPLE"], env).split()
+        for idx in range(0, len(dt_toks) - 4, 5):
+            tmpl, acct, proj, ref, _sub = dt_toks[idx : idx + 5]
+            if tmpl == "github":
+                sites_raw.append(f"https://github.com/{acct}/{proj}/archive/{ref}/")
+                sites_raw.append(f"https://github.com/{acct}/{proj}/releases/download/{ref}/")
 
     # Always include official OpenBSD distfile mirrors as reliable fallback
     sites_raw.extend(
@@ -404,6 +433,90 @@ def fetch_port_distfiles(recipe: Dict[str, Any], openbsd_version: str) -> List[T
     return fetched
 
 
+def decompress_lzip_stream(src_path: pathlib.Path, dst_fp: Any) -> None:
+    """Pure-Python LZIP v1 (.lz) multi-member decompressor with CRC32 & size verification."""
+    buf = b""
+    members_decoded = 0
+    with src_path.open("rb") as src_fp:
+        while True:
+            while len(buf) < 6:
+                chunk = src_fp.read(262144)
+                if not chunk:
+                    break
+                buf += chunk
+
+            if not buf:
+                if members_decoded == 0:
+                    die(f"cannot extract {src_path.name}: empty LZIP archive")
+                break
+
+            if not buf.startswith(b"LZIP"):
+                if members_decoded > 0:
+                    rest = src_fp.read()
+                    if all(b == 0 for b in buf) and all(b == 0 for b in rest):
+                        break
+                die(f"cannot extract {src_path.name}: invalid LZIP header magic")
+
+            if len(buf) < 6:
+                die(f"cannot extract {src_path.name}: truncated 6-byte LZIP header")
+
+            ver = buf[4]
+            if ver != 1:
+                die(f"cannot extract {src_path.name}: unsupported LZIP version {ver}")
+
+            ds = buf[5]
+            base = 1 << (ds & 0x1F)
+            dict_size = base - (base >> 4) * ((ds >> 5) & 0x07)
+            if dict_size < 4096 or dict_size > (512 << 20):
+                die(f"cannot extract {src_path.name}: invalid LZIP dictionary size {dict_size}")
+
+            buf = buf[6:]
+            member_bytes = 6
+            crc = 0
+            data_size = 0
+            dec = lzma.LZMADecompressor(
+                format=lzma.FORMAT_RAW,
+                filters=[{"id": lzma.FILTER_LZMA1, "dict_size": dict_size, "lc": 3, "lp": 0, "pb": 2}],
+            )
+
+            while not dec.eof:
+                if not buf:
+                    chunk = src_fp.read(262144)
+                    if not chunk:
+                        die(f"cannot extract {src_path.name}: unexpected EOF in LZIP compressed stream")
+                    buf = chunk
+                in_len = len(buf)
+                out = dec.decompress(buf)
+                unused = dec.unused_data
+                member_bytes += in_len - len(unused)
+                buf = unused
+                if out:
+                    crc = zlib.crc32(out, crc)
+                    data_size += len(out)
+                    dst_fp.write(out)
+
+            while len(buf) < 20:
+                chunk = src_fp.read(262144)
+                if not chunk:
+                    break
+                buf += chunk
+            if len(buf) < 20:
+                die(f"cannot extract {src_path.name}: truncated 20-byte LZIP member trailer")
+
+            exp_crc, exp_data_size, exp_member_size = struct.unpack("<IQQ", buf[:20])
+            buf = buf[20:]
+            member_bytes += 20
+
+            actual_crc = crc & 0xFFFFFFFF
+            if actual_crc != exp_crc:
+                die(f"cannot extract {src_path.name}: LZIP CRC32 mismatch (0x{actual_crc:08x} != 0x{exp_crc:08x})")
+            if data_size != exp_data_size:
+                die(f"cannot extract {src_path.name}: LZIP data size mismatch ({data_size} != {exp_data_size})")
+            if member_bytes != exp_member_size:
+                die(f"cannot extract {src_path.name}: LZIP member size mismatch ({member_bytes} != {exp_member_size})")
+            members_decoded += 1
+
+
 def extract_archive(archive_path: pathlib.Path, extract_root: pathlib.Path) -> None:
     name = archive_path.name.lower()
     if name.endswith(".zip"):
@@ -431,10 +544,12 @@ def extract_archive(archive_path: pathlib.Path, extract_root: pathlib.Path) -> N
         return
 
     if name.endswith(".tar.lz"):
-        if shutil.which("lzip"):
-            subprocess.run(["tar", "--lzip", "-xf", str(archive_path), "-C", str(extract_root)], check=True)
-            return
-        die(f"cannot extract {archive_path.name}: lzip not installed")
+        with tempfile.TemporaryFile(dir=str(extract_root.parent)) as tmp_tar:
+            decompress_lzip_stream(archive_path, tmp_tar)
+            tmp_tar.seek(0)
+            with tarfile.open(fileobj=tmp_tar, mode="r:") as tf:
+                tf.extractall(path=extract_root, filter="data")
+        return
 
     die(f"unsupported archive format: {archive_path.name}")
 

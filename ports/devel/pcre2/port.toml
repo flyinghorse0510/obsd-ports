@@ -1,0 +1,28 @@
+port = "devel/pcre2"
+depends = ["archivers/bzip2"]
+build_style = "gnu"
+separate_build = true
+use_gmake = true
+
+configure_args = [
+    "--disable-jit",
+    "--enable-pcre2-16",
+    "--enable-pcre2-32",
+    "--enable-pcre2grep-libz",
+    "--enable-pcre2grep-libbz2",
+    "--enable-pcre2test-libreadline",
+]
+
+post_install = [
+    "rm -rf \"$STAGE_DIR/usr/local/share/doc/pcre2/html\" \"$STAGE_DIR\"/usr/local/share/doc/pcre2/pcre2*.txt",
+]
+
+[[applets]]
+sym = "pcre2grep"
+binary = "/usr/local/bin/pcre2grep"
+paths = ["/usr/local/bin/pcre2grep"]
+
+[[applets]]
+sym = "pcre2test"
+binary = "/usr/local/bin/pcre2test"
+paths = ["/usr/local/bin/pcre2test"]

@@ -1,0 +1,28 @@
+port = "devel/pcre"
+build_style = "gnu"
+separate_build = true
+use_gmake = true
+
+configure_args = [
+    "--disable-cpp",
+    "--disable-jit",
+    "--enable-pcre8",
+    "--enable-pcre16",
+    "--enable-utf",
+    "--enable-unicode-properties",
+    "--enable-pcretest-libreadline",
+]
+
+post_install = [
+    "rm -rf \"$STAGE_DIR/usr/local/share/doc/pcre/html\"",
+]
+
+[[applets]]
+sym = "pcregrep"
+binary = "/usr/local/bin/pcregrep"
+paths = ["/usr/local/bin/pcregrep"]
+
+[[applets]]
+sym = "pcretest"
+binary = "/usr/local/bin/pcretest"
+paths = ["/usr/local/bin/pcretest"]

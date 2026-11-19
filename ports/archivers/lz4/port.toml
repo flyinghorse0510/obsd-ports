@@ -1,0 +1,27 @@
+port = "archivers/lz4"
+build_style = "make"
+use_gmake = true
+
+cppflags = [
+    "-DLZ4_FORCE_MEMORY_ACCESS=1",
+]
+
+build_cmd = [
+    "gmake -C lib -j\"$JOBS\" liblz4.a liblz4.pc BUILD_SHARED=no BUILD_STATIC=yes PREFIX=/usr/local",
+    "gmake -C programs -j\"$JOBS\" lz4 PREFIX=/usr/local",
+]
+
+install_cmd = [
+    "gmake -C lib install BUILD_SHARED=no BUILD_STATIC=yes DESTDIR=\"$STAGE_DIR\" PREFIX=/usr/local PKGCONFIGDIR=/usr/local/lib/pkgconfig",
+    "gmake -C programs install DESTDIR=\"$STAGE_DIR\" PREFIX=/usr/local MANDIR=/usr/local/man",
+]
+
+[[applets]]
+sym = "lz4"
+binary = "/usr/local/bin/lz4"
+paths = [
+    "/usr/local/bin/lz4",
+    "/usr/local/bin/lz4c",
+    "/usr/local/bin/lz4cat",
+    "/usr/local/bin/unlz4",
+]

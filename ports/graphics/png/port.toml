@@ -1,0 +1,13 @@
+port = "graphics/png"
+build_style = "gnu"
+separate_build = true
+use_gmake = true
+
+cppflags = [
+    "-DPNG_ARM_NEON_OPT=0",
+]
+
+configure_args = [
+    "--enable-hardware-optimizations=no",
+    "--enable-arm-neon=no",
+]

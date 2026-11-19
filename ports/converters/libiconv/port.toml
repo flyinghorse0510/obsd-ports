@@ -1,0 +1,16 @@
+port = "converters/libiconv"
+build_style = "gnu"
+separate_build = true
+use_gmake = true
+
+configure_args = [
+    "--disable-nls",
+    "--enable-extra-encodings",
+    "--enable-static",
+    "--docdir=/usr/local/share/doc/libiconv",
+]
+
+[[applets]]
+sym = "iconv"
+binary = "/usr/local/bin/iconv"
+paths = ["/usr/local/bin/iconv"]

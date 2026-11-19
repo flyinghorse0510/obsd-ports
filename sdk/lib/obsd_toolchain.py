@@ -24,6 +24,8 @@ Implements:
 """
 from __future__ import annotations
 
+import concurrent.futures
+import fcntl
 import hashlib
 import json
 import os
@@ -205,6 +207,7 @@ class ToolchainContext:
         emsdk_root = self.obsd_root / "deps/emsdk"
         em_dir = emsdk_root / "upstream/emscripten"
         llvm_bin = emsdk_root / "upstream/bin"
+        self.em_dir = em_dir
         self.emcc = em_dir / "emcc"
         self.emcxx = em_dir / "em++"
         self.emar = em_dir / "emar"
@@ -249,6 +252,8 @@ class ToolchainContext:
                 allowed.add(ps[-1])
 
         for rt_cand in (
+            self.em_sysroot / "lib/wasm64-emscripten/libclang_rt.builtins-mt.a",
+            self.em_sysroot / "lib/wasm64-emscripten/libclang_rt.builtins.a",
             self.em_sysroot / "lib/wasm64-emscripten/libcompiler_rt-mt.a",
             self.em_sysroot / "lib/wasm64-emscripten/libcompiler_rt.a",
         ):
@@ -323,6 +328,347 @@ def is_object_or_archive(arg: str) -> bool:
     return False
 
 
+LIBCPP_CONFIG_SITE_TEXT = """\
+#ifndef _LIBCPP___CONFIG_SITE
+#define _LIBCPP___CONFIG_SITE
+
+#define _LIBCPP_ABI_VERSION 2
+#define _LIBCPP_ABI_NAMESPACE __2
+#define _LIBCPP_ABI_FORCE_ITANIUM 0
+#define _LIBCPP_ABI_FORCE_MICROSOFT 0
+#define _LIBCPP_HAS_THREADS 1
+#define _LIBCPP_HAS_MONOTONIC_CLOCK 1
+#define _LIBCPP_HAS_MUSL_LIBC 0
+#define _LIBCPP_HAS_THREAD_API_PTHREAD 1
+#define _LIBCPP_HAS_THREAD_API_EXTERNAL 0
+#define _LIBCPP_HAS_THREAD_API_WIN32 0
+#define _LIBCPP_HAS_THREAD_API_C11 0
+#define _LIBCPP_HAS_VENDOR_AVAILABILITY_ANNOTATIONS 0
+#define _LIBCPP_HAS_FILESYSTEM 1
+#define _LIBCPP_HAS_RANDOM_DEVICE 1
+#define _LIBCPP_HAS_LOCALIZATION 1
+#define _LIBCPP_HAS_UNICODE 1
+#define _LIBCPP_HAS_WIDE_CHARACTERS 1
+#define _LIBCPP_HAS_TIME_ZONE_DATABASE 0
+#define _LIBCPP_INSTRUMENTED_WITH_ASAN 0
+#define _LIBCPP_PSTL_BACKEND_SERIAL
+#define _LIBCPP_HARDENING_MODE_DEFAULT _LIBCPP_HARDENING_MODE_NONE
+#define _LIBCPP_ASSERTION_SEMANTIC_DEFAULT _LIBCPP_ASSERTION_SEMANTIC_HARDENING_DEPENDENT
+#define _LIBCPP_LIBC_PICOLIBC 0
+#define _LIBCPP_LIBC_NEWLIB 0
+#define _LIBCPP_LIBC_LLVM_LIBC 0
+
+#endif // _LIBCPP___CONFIG_SITE
+"""
+
+THREADS_H_SHIM_TEXT = """\
+#ifndef _OBSD_SDK_THREADS_H
+#define _OBSD_SDK_THREADS_H
+#ifndef __cplusplus
+#ifndef thread_local
+#define thread_local _Thread_local
+#endif
+#endif
+#endif
+"""
+
+OBSD_CXX_SUPPORT_C = """\
+#include <nl_types.h>
+
+__attribute__((visibility("default"), weak)) void *__dso_handle = (void *)0;
+
+__attribute__((visibility("default"), weak)) nl_catd
+catopen(const char *name, int oflag)
+{
+\t(void)name;
+\t(void)oflag;
+\treturn (nl_catd)-1;
+}
+
+__attribute__((visibility("default"), weak)) char *
+catgets(nl_catd catd, int set_id, int msg_id, const char *s)
+{
+\t(void)catd;
+\t(void)set_id;
+\t(void)msg_id;
+\treturn (char *)s;
+}
+
+__attribute__((visibility("default"), weak)) int
+catclose(nl_catd catd)
+{
+\t(void)catd;
+\treturn 0;
+}
+"""
+
+
+def ensure_cxx_config_dir(ctx: ToolchainContext) -> pathlib.Path:
+    cfg_dir = ctx.cache_dir / f"cxx-cfg-{ctx.openbsd_version}"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    for fname, content in (
+        ("__config_site", LIBCPP_CONFIG_SITE_TEXT),
+        ("threads.h", THREADS_H_SHIM_TEXT),
+    ):
+        target = cfg_dir / fname
+        if not target.is_file() or target.read_text(encoding="utf-8") != content:
+            tmp = target.with_suffix(f".{os.getpid()}.tmp")
+            tmp.write_text(content, encoding="utf-8")
+            tmp.replace(target)
+    return cfg_dir
+
+
+def ensure_cxx_runtime(ctx: ToolchainContext) -> Tuple[pathlib.Path, pathlib.Path]:
+    """
+    Build & cache WASM64 `-pthread` `libc++.a` + `libc++abi.a` (with native Wasm EH
+    `-fwasm-exceptions` + `-sSUPPORT_LONGJMP=0`) compiled directly against the
+    OpenBSD `<ver>` sysroot (`include-root-<ver>`) so `FILE`/`errno`/`pthread_mutex_t`/
+    `stat`/`locale` layouts match `libobsdc-wasm-<ver>.a` 100%.
+    """
+    if not ctx.include_root.is_dir():
+        die(f"missing OpenBSD {ctx.openbsd_version} include root: {ctx.include_root}")
+
+    sig_src = (
+        f"cxx-rt-v2:{ctx.openbsd_version}:{ctx.emcxx.stat().st_mtime_ns}:"
+        f"{ctx.base_archive.stat().st_mtime_ns if ctx.base_archive.is_file() else 0}:"
+        f"{LIBCPP_CONFIG_SITE_TEXT}:{OBSD_CXX_SUPPORT_C}"
+    )
+    key = hashlib.sha256(sig_src.encode("utf-8")).hexdigest()[:16]
+    rt_dir = ctx.cache_dir / f"cxx-rt-{ctx.openbsd_version}-{key}"
+    libcxx_a = rt_dir / "libc++.a"
+    libcxxabi_a = rt_dir / "libc++abi.a"
+    stamp_file = rt_dir / "cxx-rt.stamp"
+
+    if stamp_file.is_file() and libcxx_a.is_file() and libcxxabi_a.is_file():
+        return libcxx_a, libcxxabi_a
+
+    rt_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = ctx.cache_dir / f"cxx-rt-{ctx.openbsd_version}.lock"
+    with lock_path.open("w") as lock_fp:
+        fcntl.flock(lock_fp.fileno(), fcntl.LOCK_EX)
+        if stamp_file.is_file() and libcxx_a.is_file() and libcxxabi_a.is_file():
+            return libcxx_a, libcxxabi_a
+
+        cfg_dir = ensure_cxx_config_dir(ctx)
+        sp = ctx.obsd_root / "src/personalities/openbsd/runtime/backends/translate/boundary"
+        res_inc = ctx.clang_resource_include()
+
+        common = [
+            "-m64",
+            "-pthread",
+            "-O2",
+            "-fno-common",
+            "-fno-builtin",
+            "-fwasm-exceptions",
+            "-sSUPPORT_LONGJMP=0",
+            "-fsanitize-coverage=func,trace-pc",
+            "-Wno-invalid-noreturn",
+            "-Wno-unsupported-visibility",
+            "-Wno-ignored-attributes",
+            "-Wno-macro-redefined",
+            "-Wno-unused-but-set-variable",
+            "-Wno-unqualified-std-cast-call",
+            "-Wno-unknown-warning-option",
+            "-Wno-user-defined-literals",
+            "-U__APPLE__",
+            "-U__MACH__",
+            "-U__EMSCRIPTEN__",
+            "-U__linux__",
+            "-U__gnu_linux__",
+            "-Ulinux",
+            "-D__OpenBSD__=1",
+            "-D__unix__=1",
+            "-D__LP64__=1",
+            "-D_LP64=1",
+            "-DLIBOBSDCOMPAT_OBJECT_FORMAT_WASM=1",
+            "-DLIBOBSDCOMPAT_KERN_GATE=1",
+            "-DLIBOBSDCOMPAT_BOUNDARY_BACKEND_EMULATE=1",
+            "-DHAVE_ATTRIBUTE__BOUNDED__=1",
+            "-nostdinc",
+        ]
+        sys_incs = [
+            "-isystem",
+            str(cfg_dir),
+            "-isystem",
+            str(ctx.em_dir / "system/lib/libcxx/include"),
+            "-isystem",
+            str(ctx.em_dir / "system/lib/libcxxabi/include"),
+            "-isystem",
+            str(sp / "wasm-gate-shadow"),
+            "-isystem",
+            str(sp),
+            "-isystem",
+            str(ctx.wasm_build_dir / "gen"),
+            "-isystem",
+            str(ctx.include_root),
+            "-include",
+            str(sp / "formats/wasm_compat.h"),
+            "-idirafter",
+            res_inc,
+        ]
+
+        with tempfile.TemporaryDirectory(prefix=f"obsd-cxx-rt-{ctx.openbsd_version}-") as td:
+            tp = pathlib.Path(td)
+            tasks: List[Tuple[str, List[str]]] = []
+
+            sup_c = tp / "obsd_cxx_support.c"
+            sup_o = tp / "obsd_cxx_support.o"
+            sup_c.write_text(OBSD_CXX_SUPPORT_C, encoding="utf-8")
+            tasks.append(("support", [str(ctx.emcc), "-c", *common, *sys_incs, str(sup_c), "-o", str(sup_o)]))
+
+            uw_o = tp / "Unwind-wasm.o"
+            tasks.append(
+                (
+                    "unwind",
+                    [
+                        str(ctx.emcc),
+                        "-c",
+                        *common,
+                        "-DNDEBUG",
+                        "-D_LIBUNWIND_HIDE_SYMBOLS",
+                        "-Wno-c23-extensions",
+                        "-I",
+                        str(ctx.em_dir / "system/lib/libunwind/include"),
+                        *sys_incs,
+                        str(ctx.em_dir / "system/lib/libunwind/src/Unwind-wasm.c"),
+                        "-o",
+                        str(uw_o),
+                    ],
+                )
+            )
+
+            abi_objs: List[pathlib.Path] = []
+            abi_files = [
+                "abort_message.cpp",
+                "cxa_aux_runtime.cpp",
+                "cxa_default_handlers.cpp",
+                "cxa_demangle.cpp",
+                "cxa_guard.cpp",
+                "cxa_handlers.cpp",
+                "cxa_virtual.cpp",
+                "cxa_thread_atexit.cpp",
+                "cxa_vector.cpp",
+                "fallback_malloc.cpp",
+                "stdlib_new_delete.cpp",
+                "stdlib_exception.cpp",
+                "stdlib_stdexcept.cpp",
+                "stdlib_typeinfo.cpp",
+                "private_typeinfo.cpp",
+                "cxa_exception_storage.cpp",
+                "cxa_exception.cpp",
+                "cxa_personality.cpp",
+            ]
+            for fn in abi_files:
+                o = tp / f"abi_{fn}.o"
+                abi_objs.append(o)
+                tasks.append(
+                    (
+                        f"cxxabi:{fn}",
+                        [
+                            str(ctx.emcxx),
+                            "-c",
+                            "-nostdinc++",
+                            "-std=c++23",
+                            *common,
+                            "-DNDEBUG",
+                            "-DHAVE___CXA_THREAD_ATEXIT_IMPL=1",
+                            "-D_LIBCPP_BUILDING_LIBRARY",
+                            "-D_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS",
+                            "-D_LIBCXXABI_BUILDING_LIBRARY",
+                            "-D_LIBCXXABI_DISABLE_VISIBILITY_ANNOTATIONS",
+                            "-DLIBCXXABI_NON_DEMANGLING_TERMINATE",
+                            "-I",
+                            str(ctx.em_dir / "system/lib/libcxx/src"),
+                            "-I",
+                            str(ctx.em_dir / "system/lib/libunwind/include"),
+                            *sys_incs,
+                            str(ctx.em_dir / "system/lib/libcxxabi/src" / fn),
+                            "-o",
+                            str(o),
+                        ],
+                    )
+                )
+
+            exclude = {
+                "xlocale_zos.cpp",
+                "mbsnrtowcs.cpp",
+                "wcsnrtombs.cpp",
+                "int128_builtins.cpp",
+                "libdispatch.cpp",
+                "locale_win32.cpp",
+                "thread_win32.cpp",
+                "support.cpp",
+                "compiler_rt_shims.cpp",
+                "time_zone.cpp",
+                "tzdb.cpp",
+                "tzdb_list.cpp",
+                "text_encoding.cpp",
+            }
+            cxx_objs: List[pathlib.Path] = []
+            cxx_src_root = ctx.em_dir / "system/lib/libcxx/src"
+            for src in sorted(cxx_src_root.rglob("*.cpp")):
+                rel = src.relative_to(cxx_src_root).as_posix()
+                if src.name in exclude or rel.startswith(
+                    ("experimental/", "pstl/", "support/win32/", "support/ibm/", "support/zos/")
+                ):
+                    continue
+                o = tp / f"cxx_{rel.replace('/', '__')}.o"
+                cxx_objs.append(o)
+                tasks.append(
+                    (
+                        f"cxx:{rel}",
+                        [
+                            str(ctx.emcxx),
+                            "-c",
+                            "-nostdinc++",
+                            "-std=c++23",
+                            *common,
+                            "-DNDEBUG",
+                            "-DLIBCXX_BUILDING_LIBCXXABI=1",
+                            "-D_LIBCPP_BUILDING_LIBRARY",
+                            "-D_LIBCPP_AVAILABILITY_MINIMUM_HEADER_VERSION=23",
+                            "-D_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS",
+                            "-D_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER",
+                            "-DLIBC_NAMESPACE=__llvm_libc",
+                            "-I",
+                            str(cxx_src_root),
+                            "-I",
+                            str(ctx.em_dir / "system/lib/llvm-libc"),
+                            *sys_incs,
+                            str(src),
+                            "-o",
+                            str(o),
+                        ],
+                    )
+                )
+
+            def _compile_one(item: Tuple[str, List[str]]) -> Tuple[str, int, str]:
+                lbl, cmd_vec = item
+                p = subprocess.run(cmd_vec, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                return lbl, p.returncode, p.stderr
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count() or 8) as pool:
+                for lbl, rc, err_txt in pool.map(_compile_one, tasks):
+                    if rc != 0:
+                        die(f"failed building WASM64 C++ runtime ({lbl}):\n{err_txt}")
+
+            tmp_cxx = tp / "libc++.a"
+            tmp_abi = tp / "libc++abi.a"
+            subprocess.run([str(ctx.emar), "rcs", str(tmp_cxx), *[str(x) for x in cxx_objs]], check=True)
+            subprocess.run(
+                [str(ctx.emar), "rcs", str(tmp_abi), *[str(x) for x in abi_objs], str(uw_o), str(sup_o)],
+                check=True,
+            )
+
+            shutil.copy2(tmp_cxx, libcxx_a)
+            shutil.copy2(tmp_abi, libcxxabi_a)
+            shutil.copy2(tmp_cxx, rt_dir / "libc++-noexcept.a")
+            shutil.copy2(tmp_abi, rt_dir / "libc++abi-noexcept.a")
+            stamp_file.write_text(key + "\n", encoding="utf-8")
+
+    return libcxx_a, libcxxabi_a
+
+
 def build_guest_compile_flags(ctx: ToolchainContext, is_cxx: bool, preprocess_only: bool) -> Tuple[List[str], List[str]]:
     sp = ctx.obsd_root / "src/personalities/openbsd/runtime/backends/translate/boundary"
     shadow_inc = sp / "wasm-gate-shadow"
@@ -344,8 +690,16 @@ def build_guest_compile_flags(ctx: ToolchainContext, is_cxx: bool, preprocess_on
         "-Wno-ignored-attributes",
         "-Wno-macro-redefined",
     ]
+    if is_cxx:
+        prefix_flags.extend(
+            [
+                "-fwasm-exceptions",
+                "-D_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS",
+                "-D_LIBCXXABI_DISABLE_VISIBILITY_ANNOTATIONS",
+            ]
+        )
     if not preprocess_only:
-        prefix_flags.append("-fsanitize-coverage=trace-pc,no-prune")
+        prefix_flags.append("-fsanitize-coverage=func,trace-pc" if is_cxx else "-fsanitize-coverage=trace-pc,no-prune")
 
     prefix_flags.extend(
         [
@@ -371,9 +725,19 @@ def build_guest_compile_flags(ctx: ToolchainContext, is_cxx: bool, preprocess_on
 
     suffix_flags: List[str] = []
     if is_cxx:
-        cxx_inc = ctx.em_sysroot / "include/c++/v1"
-        if cxx_inc.is_dir():
-            suffix_flags.extend(["-isystem", str(cxx_inc)])
+        cxx_cfg = ensure_cxx_config_dir(ctx)
+        libcxx_inc = ctx.em_dir / "system/lib/libcxx/include"
+        libcxxabi_inc = ctx.em_dir / "system/lib/libcxxabi/include"
+        suffix_flags.extend(
+            [
+                "-isystem",
+                str(cxx_cfg),
+                "-isystem",
+                str(libcxx_inc),
+                "-isystem",
+                str(libcxxabi_inc),
+            ]
+        )
 
     stage_inc = ctx.stage_dir / "usr/local/include"
     if stage_inc.is_dir():
@@ -431,10 +795,15 @@ def resolve_lo_file(path_str: str) -> str:
     return path_str
 
 
-def resolve_library(name: str, lib_dirs: Sequence[str], stage_lib_dir: pathlib.Path) -> Tuple[Optional[str], bool]:
+def resolve_library(
+    ctx: ToolchainContext,
+    name: str,
+    lib_dirs: Sequence[str],
+    stage_lib_dir: pathlib.Path,
+) -> Tuple[Optional[str], bool]:
     """
     Resolve `-l<name>`:
-      - Returns `(archive_path, True)` if a port static/relocatable library is found.
+      - Returns `(archive_path, True)` if a port or SDK C++ static library is found.
       - Returns `(None, True)` if `<name>` is a verified base OpenBSD library in `libobsdc-wasm-<ver>.a`.
       - Returns `(None, False)` if not found.
     """
@@ -471,10 +840,246 @@ def resolve_library(name: str, lib_dirs: Sequence[str], stage_lib_dir: pathlib.P
             except OSError:
                 pass
 
+    if name in ("c++", "stdc++", "c++-noexcept"):
+        libcxx_a, _ = ensure_cxx_runtime(ctx)
+        return str(libcxx_a), True
+    if name in ("c++abi", "supc++", "unwind", "c++abi-noexcept"):
+        _, libcxxabi_a = ensure_cxx_runtime(ctx)
+        return str(libcxxabi_a), True
+    if name in ("gcc", "gcc_s"):
+        return None, True
+
     if name in BASE_OPENBSD_LIBS:
         return None, True
 
     return None, False
+
+
+def wrap_wasm_init_funcs(ctx: ToolchainContext, obj_path: pathlib.Path, tmp_dir: pathlib.Path) -> int:
+    """
+    When a linked WASM64 relocatable binary defines a guest main entrypoint AND
+    carries `WASM_INIT_FUNCS` static constructors (e.g. C++ `std::ios_base::Init`
+    or global object constructors), synthesize a per-exec entry wrapper that
+    invokes all `WASM_INIT_FUNCS` in priority order before calling the real
+    `main`. Required because `wasm_object_tool.py window-guest` strips module-level
+    `WASM_INIT_FUNCS` so guest constructors never run on the host at module load.
+    """
+    emulate_tools = ctx.obsd_root / "tools/build/personalities/openbsd/backends/emulate"
+    if str(emulate_tools) not in sys.path:
+        sys.path.insert(0, str(emulate_tools))
+    import wasm_object_tool as wot  # type: ignore
+
+    data = obj_path.read_bytes()
+    if data[:8] != wot.WASM_MAGIC:
+        return 0
+
+    func_types: List[Tuple[List[int], List[int]]] = []
+    imported_func_type_idxs: List[int] = []
+    defined_func_type_idxs: List[int] = []
+    has_inits = False
+    pos = 8
+
+    while pos < len(data):
+        sec_id = data[pos]
+        sec_len, body = wot.read_uleb(data, pos + 1)
+        sec_end = body + sec_len
+        if sec_id == 1:
+            cnt, p = wot.read_uleb(data, body)
+            for _ in range(cnt):
+                form = data[p]
+                p += 1
+                if form != 0x60:
+                    return 0
+                pcnt, p = wot.read_uleb(data, p)
+                params = list(data[p : p + pcnt])
+                p += pcnt
+                rcnt, p = wot.read_uleb(data, p)
+                results = list(data[p : p + rcnt])
+                p += rcnt
+                func_types.append((params, results))
+        elif sec_id == 2:
+            cnt, p = wot.read_uleb(data, body)
+            for _ in range(cnt):
+                mlen, p = wot.read_uleb(data, p)
+                p += mlen
+                flen, p = wot.read_uleb(data, p)
+                p += flen
+                kind = data[p]
+                p += 1
+                if kind == 0:
+                    tidx, p = wot.read_uleb(data, p)
+                    imported_func_type_idxs.append(tidx)
+                elif kind == 1:
+                    p += 1
+                    flags, p = wot.read_uleb(data, p)
+                    _, p = wot.read_uleb(data, p)
+                    if flags & 0x01:
+                        _, p = wot.read_uleb(data, p)
+                elif kind == 2:
+                    flags, p = wot.read_uleb(data, p)
+                    _, p = wot.read_uleb(data, p)
+                    if flags & 0x01:
+                        _, p = wot.read_uleb(data, p)
+                elif kind == 3:
+                    p += 2
+                elif kind == 4:
+                    p += 1
+                    _, p = wot.read_uleb(data, p)
+        elif sec_id == 3:
+            cnt, p = wot.read_uleb(data, body)
+            for _ in range(cnt):
+                tidx, p = wot.read_uleb(data, p)
+                defined_func_type_idxs.append(tidx)
+        elif sec_id == 0:
+            nlen, npos = wot.read_uleb(data, body)
+            sname = data[npos : npos + nlen].decode("utf-8", "replace")
+            if sname == "linking":
+                ver, p = wot.read_uleb(data, npos + nlen)
+                if ver == 2:
+                    while p < sec_end:
+                        stype = data[p]
+                        slen, sp = wot.read_uleb(data, p + 1)
+                        if stype == wot.WASM_INIT_FUNCS and slen > 0:
+                            icnt, _ = wot.read_uleb(data[sp : sp + slen], 0)
+                            if icnt > 0:
+                                has_inits = True
+                        p = sp + slen
+        pos = sec_end
+
+    if not has_inits:
+        return 0
+
+    all_func_types = imported_func_type_idxs + defined_func_type_idxs
+    entry_orig_name: Optional[str] = None
+    entry_arity = 2
+    entry_ret_void = False
+    ordered_ctor_names: List[str] = []
+
+    def _transform(subsecs: List[Tuple[int, bytes]]) -> List[Tuple[int, bytes]]:
+        nonlocal entry_orig_name, entry_arity, entry_ret_void
+        syms = None
+        inits: List[Tuple[int, int]] = []
+        for stype, payload in subsecs:
+            if stype == wot.WASM_SYMBOL_TABLE:
+                syms = wot.parse_symbols(payload)
+            elif stype == wot.WASM_INIT_FUNCS:
+                cnt, ip = wot.read_uleb(payload, 0)
+                for _ in range(cnt):
+                    prio, ip = wot.read_uleb(payload, ip)
+                    sidx, ip = wot.read_uleb(payload, ip)
+                    inits.append((prio, sidx))
+
+        if not syms or not inits:
+            return subsecs
+
+        chosen_idx: Optional[int] = None
+        for cand in ("obsd_tool_main", "__main_argc_argv", "main"):
+            for idx, s in enumerate(syms):
+                if (
+                    s["kind"] == wot.SYMTAB_FUNCTION
+                    and not (s["flags"] & (wot.WASM_SYM_UNDEFINED | wot.WASM_SYM_BINDING_LOCAL))
+                    and s.get("name") == cand
+                ):
+                    chosen_idx = idx
+                    entry_orig_name = cand
+                    break
+            if chosen_idx is not None:
+                break
+
+        if chosen_idx is None or entry_orig_name is None:
+            return subsecs
+
+        elem_idx = syms[chosen_idx]["elem_idx"]
+        params, results = func_types[all_func_types[elem_idx]]
+        entry_arity = len(params)
+        entry_ret_void = len(results) == 0
+
+        sidx_to_name: Dict[int, str] = {}
+        for _, (prio, sidx) in sorted(enumerate(inits), key=lambda x: (x[1][0], x[0])):
+            if sidx not in sidx_to_name:
+                cname = f"__obsd_ctor_fn_{len(sidx_to_name)}"
+                sidx_to_name[sidx] = cname
+                wot.make_exported_default(syms[sidx], cname)
+            ordered_ctor_names.append(sidx_to_name[sidx])
+
+        wot.make_exported_default(syms[chosen_idx], "__obsd_real_main")
+        if entry_orig_name == "__main_argc_argv":
+            for idx, s in enumerate(syms):
+                if (
+                    idx != chosen_idx
+                    and s["kind"] == wot.SYMTAB_FUNCTION
+                    and not (s["flags"] & wot.WASM_SYM_UNDEFINED)
+                    and s.get("name") == "main"
+                ):
+                    wot.make_local(s, prefix="__obsd_unused$")
+
+        new_subsecs: List[Tuple[int, bytes]] = []
+        for stype, payload in subsecs:
+            if stype == wot.WASM_INIT_FUNCS:
+                continue
+            if stype == wot.WASM_SYMBOL_TABLE:
+                new_subsecs.append((stype, wot.serialize_symbols(syms)))
+            else:
+                new_subsecs.append((stype, payload))
+        return new_subsecs
+
+    rewritten_bytes = wot.rewrite_wasm_object(data, _transform)
+    if entry_orig_name is None or not ordered_ctor_names:
+        return 0
+
+    target_o = tmp_dir / "init_target.o"
+    target_o.write_bytes(rewritten_bytes)
+
+    rtype = "void" if entry_ret_void else "int"
+    if entry_arity == 0:
+        sig_decl, call_args = "void", ""
+    elif entry_arity == 1:
+        sig_decl, call_args = "int argc", "argc"
+    elif entry_arity == 2:
+        sig_decl, call_args = "int argc, char **argv", "argc, argv"
+    else:
+        sig_decl, call_args = "int argc, char **argv, char **envp", "argc, argv, envp"
+
+    unique_ctors = list(dict.fromkeys(ordered_ctor_names))
+    lines = [f"extern void {c}(void);" for c in unique_ctors]
+    lines.append(f"extern {rtype} __obsd_real_main({sig_decl});")
+    lines.append(f'{rtype} __obsd_ctor_entry({sig_decl}) __asm__("{entry_orig_name}");')
+    lines.append(f"{rtype} __obsd_ctor_entry({sig_decl}) {{")
+    for c in ordered_ctor_names:
+        lines.append(f"\t{c}();")
+    if entry_ret_void:
+        lines.append(f"\t__obsd_real_main({call_args});")
+    else:
+        lines.append(f"\treturn __obsd_real_main({call_args});")
+    lines.append("}")
+
+    wrap_c = tmp_dir / "ctor_wrap.c"
+    wrap_o = tmp_dir / "ctor_wrap.o"
+    wrap_c.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    rc = subprocess.run(
+        [
+            str(ctx.emcc),
+            "-c",
+            "-m64",
+            "-pthread",
+            "-O2",
+            "-fno-common",
+            "-fno-builtin",
+            "-sSUPPORT_LONGJMP=0",
+            "-fsanitize-coverage=trace-pc,no-prune",
+            "-nostdinc",
+            str(wrap_c),
+            "-o",
+            str(wrap_o),
+        ]
+    ).returncode
+    if rc != 0:
+        return rc
+
+    return subprocess.run(
+        [str(ctx.wasm_ld), "-m", "wasm64", "-r", str(wrap_o), str(target_o), "-o", str(obj_path)]
+    ).returncode
 
 
 def verify_undefined_symbols(ctx: ToolchainContext, obj_path: pathlib.Path) -> Optional[List[str]]:
@@ -741,7 +1346,7 @@ def run_cc_driver(argv: List[str], is_cxx: bool) -> int:
             elif kind == "obj":
                 ld_inputs.append(val)
             elif kind == "lib":
-                resolved_ar, ok = resolve_library(val, lib_dirs, ctx.stage_dir / "usr/local/lib")
+                resolved_ar, ok = resolve_library(ctx, val, lib_dirs, ctx.stage_dir / "usr/local/lib")
                 if not ok:
                     sys.stderr.write(f"obsd-ld: error: unable to find library -l{val}\n")
                     return 1
@@ -753,6 +1358,17 @@ def run_cc_driver(argv: List[str], is_cxx: bool) -> int:
         if not ld_inputs:
             sys.stderr.write("obsd-ld: error: no input files\n")
             return 1
+
+        no_default_cxx = any(f in argv for f in ("-nostdlib", "-nostdlib++", "-nodefaultlibs"))
+        if is_cxx and not no_default_cxx:
+            libcxx_a, libcxxabi_a = ensure_cxx_runtime(ctx)
+            for ar_p in (str(libcxx_a), str(libcxxabi_a)):
+                if ar_p not in ld_inputs:
+                    ld_inputs.append(ar_p)
+        elif any(os.path.basename(x).startswith("libc++.") or os.path.basename(x).startswith("libc++-") for x in ld_inputs):
+            _, libcxxabi_a = ensure_cxx_runtime(ctx)
+            if str(libcxxabi_a) not in ld_inputs:
+                ld_inputs.append(str(libcxxabi_a))
 
         out_file.parent.mkdir(parents=True, exist_ok=True)
         tmp_linked = out_file.parent / f".{out_file.name}.{os.getpid()}.wasm.tmp"
@@ -772,6 +1388,10 @@ def run_cc_driver(argv: List[str], is_cxx: bool) -> int:
             return ld_proc.returncode
 
         if not is_shared:
+            init_rc = wrap_wasm_init_funcs(ctx, tmp_linked, tmp_p)
+            if init_rc != 0:
+                tmp_linked.unlink(missing_ok=True)
+                return init_rc
             missing_syms = verify_undefined_symbols(ctx, tmp_linked)
             if missing_syms:
                 tmp_linked.unlink(missing_ok=True)

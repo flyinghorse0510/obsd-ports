@@ -37,6 +37,14 @@
 #include <lua-5.4/lauxlib.h>
 #include <lua-5.4/lualib.h>
 #include <curl/curl.h>
+#include <iconv.h>
+#include <localcharset.h>
+#define PCRE2_CODE_UNIT_WIDTH 8
+#include <pcre2.h>
+#include <pcre.h>
+#include <lz4.h>
+#include <xxhash.h>
+#include <png.h>
 
 static int
 verify_static_libraries(void)
@@ -127,9 +135,93 @@ verify_static_libraries(void)
 		return 1;
 	}
 
-	printf("[PORTS-PASS] static_libs_c_api: bzip2=%s lzma=%s zstd=%u sqlite=%s lua=%s curl=%s(%s)\n",
+	/* 8. libiconv.a + libcharset.a */
+	const char *cs = locale_charset();
+	if (cs == NULL || cs[0] == '\0') {
+		fprintf(stderr, "[FAIL] locale_charset returned empty\n");
+		return 1;
+	}
+	iconv_t cd = iconv_open("UTF-16LE", "UTF-8");
+	if (cd == (iconv_t)-1) {
+		fprintf(stderr, "[FAIL] iconv_open failed\n");
+		return 1;
+	}
+	char ic_in_buf[] = "BSD";
+	char *ic_in = ic_in_buf;
+	size_t ic_in_left = 3;
+	char ic_out_buf[16] = {0};
+	char *ic_out = ic_out_buf;
+	size_t ic_out_left = sizeof(ic_out_buf);
+	if (iconv(cd, &ic_in, &ic_in_left, &ic_out, &ic_out_left) == (size_t)-1 ||
+	    ic_in_left != 0 || (sizeof(ic_out_buf) - ic_out_left) != 6) {
+		fprintf(stderr, "[FAIL] iconv UTF-8->UTF-16LE conversion failed\n");
+		iconv_close(cd);
+		return 1;
+	}
+	iconv_close(cd);
+
+	/* 9. libpcre2-8.a */
+	int p2_err = 0;
+	PCRE2_SIZE p2_off = 0;
+	pcre2_code *p2_re = pcre2_compile((PCRE2_SPTR)"^WASM([0-9]+)$",
+	    PCRE2_ZERO_TERMINATED, 0, &p2_err, &p2_off, NULL);
+	if (p2_re == NULL) {
+		fprintf(stderr, "[FAIL] pcre2_compile failed\n");
+		return 1;
+	}
+	pcre2_match_data *p2_md = pcre2_match_data_create_from_pattern(p2_re, NULL);
+	int p2_rc = pcre2_match(p2_re, (PCRE2_SPTR)"WASM64", 6, 0, 0, p2_md, NULL);
+	pcre2_match_data_free(p2_md);
+	pcre2_code_free(p2_re);
+	if (p2_rc < 2) {
+		fprintf(stderr, "[FAIL] pcre2_match failed: %d\n", p2_rc);
+		return 1;
+	}
+
+	/* 10. libpcre.a */
+	const char *p1_err = NULL;
+	int p1_off = 0;
+	pcre *p1_re = pcre_compile("^OpenBSD-([0-9]+)$", 0, &p1_err, &p1_off, NULL);
+	if (p1_re == NULL) {
+		fprintf(stderr, "[FAIL] pcre_compile failed\n");
+		return 1;
+	}
+	int p1_ov[6];
+	int p1_rc = pcre_exec(p1_re, NULL, "OpenBSD-79", 10, 0, 0, p1_ov, 6);
+	pcre_free(p1_re);
+	if (p1_rc < 2) {
+		fprintf(stderr, "[FAIL] pcre_exec failed: %d\n", p1_rc);
+		return 1;
+	}
+
+	/* 11. liblz4.a */
+	const char lz4_src[] = "OpenBSD WASM64 LZ4 static library roundtrip payload OpenBSD WASM64";
+	char lz4_cmp[128];
+	char lz4_dec[128];
+	int lz4_clen = LZ4_compress_default(lz4_src, lz4_cmp, (int)sizeof(lz4_src), (int)sizeof(lz4_cmp));
+	int lz4_dlen = (lz4_clen > 0) ? LZ4_decompress_safe(lz4_cmp, lz4_dec, lz4_clen, (int)sizeof(lz4_dec)) : -1;
+	if (lz4_dlen != (int)sizeof(lz4_src) || memcmp(lz4_src, lz4_dec, sizeof(lz4_src)) != 0) {
+		fprintf(stderr, "[FAIL] liblz4 round-trip failed\n");
+		return 1;
+	}
+
+	/* 12. libxxhash.a */
+	XXH64_hash_t xh = XXH64("OpenBSD", 7, 0);
+	if (xh == 0) {
+		fprintf(stderr, "[FAIL] XXH64 returned 0\n");
+		return 1;
+	}
+
+	/* 13. libpng.a */
+	png_uint_32 png_ver = png_access_version_number();
+	if (png_ver < 10600) {
+		fprintf(stderr, "[FAIL] unexpected png_access_version_number: %lu\n", (unsigned long)png_ver);
+		return 1;
+	}
+
+	printf("[PORTS-PASS] static_libs_c_api: bzip2=%s lzma=%s zstd=%u sqlite=%s lua=%s curl=%s(%s) lz4=%d xxh=%u png=%lu\n",
 	    bz_ver, xz_ver, zstd_ver, sqlite3_libversion(), LUA_RELEASE,
-	    cv->version, cv->ssl_version);
+	    cv->version, cv->ssl_version, LZ4_versionNumber(), XXH_versionNumber(), (unsigned long)png_ver);
 	fflush(stdout);
 	return 0;
 }

@@ -85,11 +85,13 @@ HOST_RUNNER_C = r'''
 void vfs_device_init_all(void) {}
 
 extern int obsd_wasm_host_pipe(int fds[2], int nonblock);
+extern int obsd_wasm_host_dup(int host_fd);
 extern int obsd_wasm_host_close(int host_fd);
 extern ssize_t obsd_wasm_host_read(int host_fd, void *buf, size_t len);
 __attribute__((weak)) uintptr_t obsd_wasm_svnp_shm_addr(void);
 
 static int g_out_pipe[2] = { -1, -1 };
+static int g_err_fd = -1;
 static int g_in_pipe[2] = { -1, -1 };
 static volatile int g_done = 0;
 static volatile int g_wait_status = -1;
@@ -128,7 +130,7 @@ ports_runner_thread(void *arg)
 	req.envp = env_vec;
 	req.host_stdin = g_in_pipe[0];
 	req.host_stdout = g_out_pipe[1];
-	req.host_stderr = g_out_pipe[1];
+	req.host_stderr = g_err_fd;
 	req.max_processes = 64;
 	req.applets = builtin ? builtin->applets : NULL;
 	req.allocate = malloc;
@@ -143,6 +145,8 @@ ports_runner_thread(void *arg)
 			(void)obsd_wasm_host_close(g_in_pipe[0]);
 		if (g_out_pipe[1] >= 0)
 			(void)obsd_wasm_host_close(g_out_pipe[1]);
+		if (g_err_fd >= 0)
+			(void)obsd_wasm_host_close(g_err_fd);
 	}
 	g_wait_status = rc;
 	g_embed_error = st.error;
@@ -184,6 +188,9 @@ ports_start(int enable_svnp)
 		return -1;
 	if (obsd_wasm_host_pipe(g_out_pipe, 1) != 0)
 		return -2;
+	g_err_fd = obsd_wasm_host_dup(g_out_pipe[1]);
+	if (g_err_fd < 0)
+		return -4;
 	(void)obsd_wasm_host_close(g_in_pipe[1]);
 	g_in_pipe[1] = -1;
 
@@ -651,10 +658,10 @@ def build_and_cache_test_runtime(
             "-sEXPORT_ES6=1",
             "-sENVIRONMENT=node",
             "-sALLOW_MEMORY_GROWTH=1",
-            "-sINITIAL_MEMORY=134217728",
-            "-sMAXIMUM_MEMORY=1073741824",
+            "-sINITIAL_MEMORY=268435456",
+            "-sMAXIMUM_MEMORY=4294967296",
             "-sSTACK_SIZE=1048576",
-            "-sPTHREAD_POOL_SIZE=16",
+            "-sPTHREAD_POOL_SIZE=32",
             "-sEXIT_RUNTIME=0",
             f"-sEXPORTED_FUNCTIONS={exported_fns}",
             f"-sEXPORTED_RUNTIME_METHODS={exported_rt}",

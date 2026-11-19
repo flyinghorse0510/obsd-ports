@@ -106,6 +106,23 @@ def main() -> int:
 
     verify_sdk_smoke(args.openbsd_version, obsd_root)
 
+    test_sdk_py = REPO_ROOT / "tests/test_sdk.py"
+    if test_sdk_py.is_file():
+        rc_sdk = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                str(test_sdk_py),
+                "--openbsd-version",
+                args.openbsd_version,
+                "--libobsdcompat-root",
+                str(obsd_root),
+            ],
+            cwd=str(REPO_ROOT),
+        ).returncode
+        if rc_sdk != 0:
+            return rc_sdk
+
     suite_py = REPO_ROOT / "tests/run_wasm_ports_tests.py"
     if not suite_py.is_file():
         print(f"[check/{args.openbsd_version}] tests/run_wasm_ports_tests.py not yet present; SDK check passed")

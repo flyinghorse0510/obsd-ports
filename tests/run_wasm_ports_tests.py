@@ -49,6 +49,19 @@ REQUIRED_STATIC_LIBS = [
     "libsqlite3.a",
     "liblua5.4.a",
     "libcurl.a",
+    "libiconv.a",
+    "libcharset.a",
+    "libpcre2-8.a",
+    "libpcre2-16.a",
+    "libpcre2-32.a",
+    "libpcre2-posix.a",
+    "libpcre.a",
+    "libpcre16.a",
+    "libpcreposix.a",
+    "liblz4.a",
+    "libxxhash.a",
+    "libpng.a",
+    "libpng16.a",
 ]
 
 REQUIRED_HEADERS = [
@@ -59,6 +72,27 @@ REQUIRED_HEADERS = [
     "sqlite3.h",
     "lua-5.4/lua.h",
     "curl/curl.h",
+    "iconv.h",
+    "localcharset.h",
+    "pcre2.h",
+    "pcre.h",
+    "lz4.h",
+    "xxhash.h",
+    "png.h",
+]
+
+REQUIRED_PKGCONFIGS = [
+    "libpcre2-8.pc",
+    "libpcre2-16.pc",
+    "libpcre2-32.pc",
+    "libpcre2-posix.pc",
+    "libpcre.pc",
+    "libpcre16.pc",
+    "libpcreposix.pc",
+    "liblz4.pc",
+    "libxxhash.pc",
+    "libpng.pc",
+    "libpng16.pc",
 ]
 
 REQUIRED_APPLET_PATHS = [
@@ -82,6 +116,19 @@ REQUIRED_APPLET_PATHS = [
     "/usr/local/bin/tree",
     "/usr/local/bin/nano",
     "/usr/local/bin/curl",
+    "/usr/local/bin/iconv",
+    "/usr/local/bin/pcre2grep",
+    "/usr/local/bin/pcre2test",
+    "/usr/local/bin/pcregrep",
+    "/usr/local/bin/pcretest",
+    "/usr/local/bin/lz4",
+    "/usr/local/bin/lz4c",
+    "/usr/local/bin/lz4cat",
+    "/usr/local/bin/unlz4",
+    "/usr/local/bin/xxhsum",
+    "/usr/local/bin/xxh32sum",
+    "/usr/local/bin/xxh64sum",
+    "/usr/local/bin/xxh128sum",
 ]
 
 HOST_SUITE_C = r'''
@@ -267,11 +314,11 @@ OS_REL=$(uname -r)
 [ "$OS_SYS" = "OpenBSD" ] || fail "expected OpenBSD, got $OS_SYS"
 [ "$OS_REL" = "$EXPECTED_REL" ] || fail "expected release $EXPECTED_REL, got $OS_REL"
 
-for bin in bzip2 bunzip2 bzcat bzip2recover xz unxz xzcat lzma unlzma lzcat zstd unzstd zstdcat jq sqlite3 lua54 lua luac54 tree nano curl; do
+for bin in bzip2 bunzip2 bzcat bzip2recover xz unxz xzcat lzma unlzma lzcat zstd unzstd zstdcat jq sqlite3 lua54 lua luac54 tree nano curl iconv pcre2grep pcre2test pcregrep pcretest lz4 lz4c lz4cat unlz4 xxhsum xxh32sum xxh64sum xxh128sum; do
 	resolved=$(command -v "$bin") || fail "command -v $bin failed"
 	[ "$resolved" = "/usr/local/bin/$bin" ] || fail "expected /usr/local/bin/$bin, got $resolved"
 done
-pass "01_release_and_which" "OpenBSD $OS_REL verified; all 20 port binaries on PATH"
+pass "01_release_and_which" "OpenBSD $OS_REL verified; all 33 port binaries on PATH"
 
 # 02. Static library C API linkage & execution check
 /usr/libexec/ports_pty_probe libs
@@ -435,6 +482,30 @@ LOCAL_HTTP=$(curl -fsSL "http://127.0.0.1:__LOCAL_HTTP_PORT__/obsd-ports-ping")
 LIVE_HTTPS=$(curl -fsSL --connect-timeout 15 --max-time 30 https://example.com)
 echo "$LIVE_HTTPS" | grep -q "Example Domain" || fail "live HTTPS curl https://example.com missing 'Example Domain'"
 pass "11_curl_libressl_and_live_https" "$(echo "$CURL_VER" | head -n 1) + live HTTPS https://example.com OK"
+
+# 12. Wave-2 Foundation Applets under MALLOC_OPTIONS=JJ (iconv, pcre2grep, pcregrep, lz4, xxhsum)
+ICONV_RT=$(printf 'OpenBSD WASM64 \303\251\303\240\303\274\n' | MALLOC_OPTIONS=JJ iconv -f UTF-8 -t ISO-8859-1 | MALLOC_OPTIONS=JJ iconv -f ISO-8859-1 -t UTF-8)
+[ "$ICONV_RT" = "$(printf 'OpenBSD WASM64 \303\251\303\240\303\274\n')" ] || fail "iconv UTF-8<->ISO-8859-1 mismatch: $ICONV_RT"
+
+PCRE2_OUT=$(printf 'alpha-1\nOpenBSD-7.8\nOpenBSD-7.9\n' | MALLOC_OPTIONS=JJ pcre2grep -o1 '^OpenBSD-([0-9]+\.[0-9]+)$' | tr '\n' ',')
+[ "$PCRE2_OUT" = "7.8,7.9," ] || fail "pcre2grep output mismatch: $PCRE2_OUT"
+
+PCRE1_OUT=$(printf 'low\nOpenBSD_WASM64\n' | MALLOC_OPTIONS=JJ pcregrep -u '^\p{Lu}[A-Za-z0-9_]+$')
+[ "$PCRE1_OUT" = "OpenBSD_WASM64" ] || fail "pcregrep UTF-8 unicode properties mismatch: $PCRE1_OUT"
+
+MALLOC_OPTIONS=JJ lz4 -q -f /tmp/arch_test/payload.bin /tmp/arch_test/t.lz4
+[ -s /tmp/arch_test/t.lz4 ] || fail "lz4 did not create .lz4"
+LZ4_CAT_SHA=$(MALLOC_OPTIONS=JJ lz4cat /tmp/arch_test/t.lz4 | /bin/sha256 -q)
+[ "$LZ4_CAT_SHA" = "$ORIG_SHA" ] || fail "lz4cat SHA256 mismatch: $LZ4_CAT_SHA != $ORIG_SHA"
+MALLOC_OPTIONS=JJ unlz4 -q -f /tmp/arch_test/t.lz4 /tmp/arch_test/t_unlz4.bin
+[ "$(/bin/sha256 -q /tmp/arch_test/t_unlz4.bin)" = "$ORIG_SHA" ] || fail "unlz4 SHA256 mismatch"
+
+XXH64_LINE=$(MALLOC_OPTIONS=JJ xxh64sum /tmp/arch_test/payload.bin)
+printf '%s\n' "$XXH64_LINE" > /tmp/arch_test/payload.xxh64
+MALLOC_OPTIONS=JJ xxhsum -q -c /tmp/arch_test/payload.xxh64 || fail "xxhsum -c failed"
+set -- $(MALLOC_OPTIONS=JJ xxh128sum /tmp/arch_test/payload.bin)
+[ "${#1}" = "32" ] || fail "xxh128sum digest length mismatch: $1 (${#1})"
+pass "12_wave2_foundation_applets" "MALLOC_OPTIONS=JJ iconv + pcre2grep + pcregrep + lz4/unlz4 + xxhsum/xxh64sum/xxh128sum OK"
 
 echo "[PORTS-ALL-OK] OpenBSD $OS_REL WASM64 ports suite passed 100%"
 '''
@@ -962,7 +1033,7 @@ def find_node(obsd_root: pathlib.Path) -> str:
     env_node = os.environ.get("EMSDK_NODE", "").strip()
     if env_node and pathlib.Path(env_node).is_file():
         return env_node
-    emsdk_nodes = sorted((obsd_root / "deps/emsdk/node").glob("*/*/bin/node"))
+    emsdk_nodes = sorted((obsd_root / "deps/emsdk/node").rglob("bin/node"))
     if emsdk_nodes:
         return str(emsdk_nodes[-1])
     w = shutil.which("node")
@@ -1019,6 +1090,12 @@ def verify_lane_artifacts(ver: str, lane_dir: pathlib.Path) -> None:
         hp = sysroot_inc / hdr_rel
         if not hp.is_file():
             raise SystemExit(f"[FAIL/{ver}] missing staged header: {hp}")
+
+    stage_pc = lane_dir / "stage/usr/local/lib/pkgconfig"
+    for pc_name in REQUIRED_PKGCONFIGS:
+        pcp = stage_pc / pc_name
+        if not pcp.is_file() and not pcp.is_symlink():
+            raise SystemExit(f"[FAIL/{ver}] missing staged pkg-config file: {pcp}")
 
     if not tsv_path.is_file():
         raise SystemExit(f"[FAIL/{ver}] missing {tsv_path}")
@@ -1087,6 +1164,13 @@ def build_suite_runtime(ver: str, obsd_root: pathlib.Path, lane_dir: pathlib.Pat
             "-lsqlite3",
             "-llua5.4",
             "-lcurl",
+            "-liconv",
+            "-lcharset",
+            "-lpcre2-8",
+            "-lpcre",
+            "-llz4",
+            "-lxxhash",
+            "-lpng",
             "-lssl",
             "-lcrypto",
             "-lz",

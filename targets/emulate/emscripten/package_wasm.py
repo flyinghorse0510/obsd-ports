@@ -70,6 +70,26 @@ def is_wasm_object(path: pathlib.Path) -> bool:
         return False
 
 
+def resolve_staged_symlink(stage_dir: pathlib.Path, link_path: pathlib.Path, max_hops: int = 16) -> Optional[pathlib.Path]:
+    """Resolve a staged path or symlink (supporting both relative and guest-absolute targets)."""
+    cur = link_path
+    stage_resolved = stage_dir.resolve()
+    for _ in range(max_hops):
+        if not cur.is_symlink():
+            return cur.resolve() if cur.exists() else None
+        raw_target = os.readlink(cur)
+        if os.path.isabs(raw_target):
+            raw_p = pathlib.Path(raw_target)
+            try:
+                raw_p.relative_to(stage_resolved)
+                cur = raw_p
+            except ValueError:
+                cur = stage_dir / raw_target.lstrip("/")
+        else:
+            cur = cur.parent / raw_target
+    return cur.resolve() if (cur.exists() and not cur.is_symlink()) else None
+
+
 def detect_wasm_main_symbol(llvm_nm: pathlib.Path, obj_path: pathlib.Path, explicit_entry: str) -> str:
     if explicit_entry and explicit_entry != "auto":
         return explicit_entry
@@ -132,13 +152,30 @@ def localize_port_applets(
             if not paths:
                 paths = [f"/{bin_rel}"]
 
-            bin_path = stage_dir / bin_rel
-            if bin_path.is_symlink():
-                bin_path = bin_path.resolve()
-            if not bin_path.is_file():
+            bin_stage_entry = stage_dir / bin_rel
+            bin_path = resolve_staged_symlink(stage_dir, bin_stage_entry) if bin_stage_entry.is_symlink() else bin_stage_entry
+            if bin_path is None or not bin_path.is_file():
                 die(f"applet '{sym}' ({rec['port']}): staged binary missing at {stage_dir / bin_rel}")
-            if not is_wasm_object(bin_path):
-                die(f"applet '{sym}' ({rec['port']}): {bin_path} is not a WASM64 relocatable binary")
+            bin_resolved = bin_path.resolve()
+            if not is_wasm_object(bin_resolved):
+                die(f"applet '{sym}' ({rec['port']}): {bin_resolved} is not a WASM64 relocatable binary")
+            bin_path = bin_resolved
+
+            # Optional automatic multi-call symlink alias discovery (e.g. coreutils `--enable-single-binary=symlinks`)
+            for alias_dir in app.get("discover_symlink_aliases_in", []):
+                scan_dir = stage_dir / str(alias_dir).lstrip("/")
+                if not scan_dir.is_dir():
+                    continue
+                for ent in sorted(scan_dir.iterdir(), key=lambda p: p.name):
+                    if not ent.is_symlink():
+                        continue
+                    target_resolved = resolve_staged_symlink(stage_dir, ent)
+                    if target_resolved is not None and target_resolved == bin_resolved:
+                        alias_gp = "/" + ent.relative_to(stage_dir).as_posix()
+                        if alias_gp not in paths:
+                            paths.append(alias_gp)
+
+            paths = list(dict.fromkeys(paths))
 
             # Normalize through `wasm-ld -m wasm64 -r` if extra objects/archives are requested,
             # or copy directly when `obsd-cc` already emitted a `wasm-ld -m wasm64 -r` object.
