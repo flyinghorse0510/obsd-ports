@@ -1,0 +1,22 @@
+port = "archivers/pigz"
+build_style = "make"
+use_gmake = true
+
+build_cmd = [
+    "gmake -j\"$JOBS\" pigz CC=\"$CC\" CFLAGS=\"$CFLAGS -Wall -Wextra\" LDFLAGS=\"$LDFLAGS\" LIBS=\"-lm -lpthread -lz\"",
+]
+
+install_cmd = [
+    "obsd-install -d -m 0755 \"$STAGE_DIR/usr/local/bin\" \"$STAGE_DIR/usr/local/man/man1\"",
+    "obsd-install -c -m 0755 pigz \"$STAGE_DIR/usr/local/bin/pigz\"",
+    "ln -sf pigz \"$STAGE_DIR/usr/local/bin/unpigz\"",
+    "obsd-install -c -m 0444 pigz.1 \"$STAGE_DIR/usr/local/man/man1/pigz.1\"",
+]
+
+[[applets]]
+sym = "pigz"
+binary = "/usr/local/bin/pigz"
+paths = [
+    "/usr/local/bin/pigz",
+    "/usr/local/bin/unpigz",
+]

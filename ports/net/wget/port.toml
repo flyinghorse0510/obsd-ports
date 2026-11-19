@@ -1,0 +1,37 @@
+port = "net/wget"
+depends = ["devel/pcre2", "converters/libiconv"]
+build_style = "gnu"
+separate_build = true
+use_gmake = true
+
+pre_configure = [
+    "sed -i 's,\\${SYSCONFDIR},/usr/local/etc,g' \"$WRKSRC/doc/sample.wgetrc\" \"$WRKSRC/doc/wget.texi\"",
+    "touch -r \"$WRKSRC/configure\" \"$WRKSRC/doc/wget.texi\"",
+]
+
+configure_args = [
+    "--sysconfdir=/usr/local/etc",
+    "--with-ssl=openssl",
+    "--with-zlib",
+    "--disable-nls",
+    "--disable-iri",
+    "--without-libpsl",
+    "--without-libidn",
+    "--without-metalink",
+    "--without-cares",
+]
+
+post_install = [
+    "mkdir -p \"$STAGE_DIR/usr/local/etc\"",
+    "if [ -f \"$STAGE_DIR/usr/local/etc/wgetrc\" ]; then sed -i '/^[[:space:]]*ca_certificate[[:space:]]*=/d' \"$STAGE_DIR/usr/local/etc/wgetrc\"; fi",
+    "printf '\\nca_certificate = /etc/ssl/cert.pem\\n' >> \"$STAGE_DIR/usr/local/etc/wgetrc\"",
+    "chmod 0644 \"$STAGE_DIR/usr/local/etc/wgetrc\"",
+]
+
+[env]
+MAKEINFO = "true"
+
+[[applets]]
+sym = "wget"
+binary = "/usr/local/bin/wget"
+paths = ["/usr/local/bin/wget"]

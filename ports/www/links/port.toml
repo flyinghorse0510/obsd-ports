@@ -1,0 +1,32 @@
+port = "www/links"
+build_style = "gnu"
+use_gmake = true
+
+cflags = [
+    "-std=gnu89",
+    "-Wno-implicit-int",
+    "-Wno-implicit-function-declaration",
+    "-Wno-deprecated-non-prototype",
+]
+
+pre_configure = [
+    "cp -f /usr/share/misc/config.sub /usr/share/misc/config.guess \"$WRKSRC/\"",
+]
+
+configure_args = [
+    "--with-ssl",
+    "--without-x",
+    "--without-svgalib",
+    "--without-fb",
+    "--without-directfb",
+    "--without-pmshell",
+    "--without-atheos",
+]
+
+[env]
+ac_cv_rename_over_existing_files = "yes"
+
+[[applets]]
+sym = "links"
+binary = "/usr/local/bin/links"
+paths = ["/usr/local/bin/links"]

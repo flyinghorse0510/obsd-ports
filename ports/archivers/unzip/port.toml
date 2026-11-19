@@ -1,0 +1,34 @@
+port = "archivers/unzip"
+build_style = "make"
+use_gmake = true
+apply_vendor_patches = true
+
+build_cmd = [
+    "gmake -f unix/Makefile -j\"$JOBS\" bsd CC=\"$CC\" LD=\"$CC\" CF=\"$CFLAGS -I. -DLARGE_FILE_SUPPORT -DNO_LCHMOD -DUSE_UNSHRINK\" LOC=\"-DLARGE_FILE_SUPPORT -DNO_LCHMOD -DUSE_UNSHRINK\"",
+]
+
+install_cmd = [
+    "obsd-install -d -m 0755 \"$STAGE_DIR/usr/local/bin\" \"$STAGE_DIR/usr/local/man/man1\" \"$STAGE_DIR/usr/local/share/doc/unzip\"",
+    "obsd-install -c -m 0755 unzip funzip unzipsfx unix/zipgrep \"$STAGE_DIR/usr/local/bin/\"",
+    "ln -sf unzip \"$STAGE_DIR/usr/local/bin/zipinfo\"",
+    "obsd-install -c -m 0444 man/funzip.1 man/unzip.1 man/unzipsfx.1 man/zipgrep.1 man/zipinfo.1 \"$STAGE_DIR/usr/local/man/man1/\"",
+    "obsd-install -c -m 0644 COPYING.OLD LICENSE README WHERE \"$STAGE_DIR/usr/local/share/doc/unzip/\"",
+]
+
+[[applets]]
+sym = "unzip"
+binary = "/usr/local/bin/unzip"
+paths = [
+    "/usr/local/bin/unzip",
+    "/usr/local/bin/zipinfo",
+]
+
+[[applets]]
+sym = "funzip"
+binary = "/usr/local/bin/funzip"
+paths = ["/usr/local/bin/funzip"]
+
+[[applets]]
+sym = "unzipsfx"
+binary = "/usr/local/bin/unzipsfx"
+paths = ["/usr/local/bin/unzipsfx"]

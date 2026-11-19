@@ -1,0 +1,30 @@
+port = "net/rsync"
+depends = ["archivers/zstd", "archivers/lz4", "sysutils/xxhash", "converters/libiconv"]
+build_style = "gnu"
+use_gmake = true
+
+cppflags = [
+    "-DXXH_INLINE_ALL=1",
+]
+
+pre_configure = [
+    "sed -i 's,\\${PREFIX},/usr/local,g' \"$WRKSRC/support/rrsync\"",
+]
+
+configure_args = [
+    "--disable-md2man",
+    "--disable-simd",
+    "--disable-asm",
+    "--disable-roll-simd",
+    "--with-included-popt",
+    "--with-rsh=/usr/bin/ssh",
+    "--enable-zstd",
+    "--enable-lz4",
+    "--enable-xxhash",
+    "--enable-iconv",
+]
+
+[[applets]]
+sym = "rsync"
+binary = "/usr/local/bin/rsync"
+paths = ["/usr/local/bin/rsync"]

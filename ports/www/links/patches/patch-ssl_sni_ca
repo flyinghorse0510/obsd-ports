@@ -1,0 +1,35 @@
+Enable TLS SNI (SSL_set_tlsext_host_name), peer hostname verification
+(SSL_set1_host), and /etc/ssl/cert.pem CA bundle loading in links 1.03
+so modern HTTPS endpoints (e.g. https://example.com) verify cleanly.
+
+--- https.c.orig
++++ https.c
+@@ -38,7 +38,9 @@
+ 		SSLeay_add_ssl_algorithms();
+ 		context = SSL_CTX_new(SSLv23_client_method());
+ 		SSL_CTX_set_options(context, SSL_OP_ALL);
++		SSL_CTX_load_verify_locations(context, "/etc/ssl/cert.pem", NULL);
+ 		SSL_CTX_set_default_verify_paths(context);
++		SSL_CTX_set_verify(context, SSL_VERIFY_PEER, NULL);
+ /* needed for systems without /dev/random, but obviously kills security. */
+ 		/*{
+ 			char pool[32768];
+--- connect.c.orig
++++ connect.c
+@@ -182,8 +182,16 @@
+ 	set_timeout(c);
+ #ifdef HAVE_SSL
+ 	if (c->ssl) {
++		unsigned char *sni_host;
+ 		c->ssl = getSSL();
+ 		SSL_set_fd(c->ssl, *b->sock);
++		if ((sni_host = get_host_name(c->url)) != NULL) {
++			if (*sni_host && !strchr((const char *)sni_host, ':') && sni_host[strspn((const char *)sni_host, "0123456789.")] != '\0') {
++				SSL_set_tlsext_host_name(c->ssl, (const char *)sni_host);
++				SSL_set1_host(c->ssl, (const char *)sni_host);
++			}
++			mem_free(sni_host);
++		}
+ 		switch (SSL_get_error(c->ssl, SSL_connect(c->ssl))) {
+ 			case SSL_ERROR_WANT_READ:
+ 				setcstate(c, S_SSL_NEG);
