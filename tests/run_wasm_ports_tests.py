@@ -359,7 +359,18 @@ SQL_OUT=$(sqlite3 /tmp/test.db "SELECT COUNT(*) || ':' || SUM(score) || ':' || (
 [ "$SQL_OUT" = "4:392:curl" ] || fail "sqlite3 persistent query mismatch: $SQL_OUT"
 FTS_OUT=$(sqlite3 /tmp/test.db "SELECT title FROM docs WHERE docs MATCH 'WebAssembly';")
 [ "$FTS_OUT" = "OpenBSD WASM64" ] || fail "sqlite3 FTS5 query mismatch: $FTS_OUT"
-pass "07_sqlite3_persistent_sql" "sqlite3 /tmp/test.db persisted ($SQL_OUT, FTS5='$FTS_OUT')"
+
+# 20-iteration MALLOC_OPTIONS=JJ variadic stack/heap poison regression check
+jj_i=0
+while [ $jj_i -lt 20 ]; do
+	JJ_OUT=$(MALLOC_OPTIONS=JJ sqlite3 :memory: 'SELECT sqlite_version(), 6*7;') || fail "MALLOC_OPTIONS=JJ sqlite3 crashed on iter $jj_i"
+	case "$JJ_OUT" in
+		*"|42") ;;
+		*) fail "MALLOC_OPTIONS=JJ sqlite3 unexpected output on iter $jj_i: $JJ_OUT" ;;
+	esac
+	jj_i=$((jj_i + 1))
+done
+pass "07_sqlite3_persistent_sql" "sqlite3 /tmp/test.db persisted ($SQL_OUT, FTS5='$FTS_OUT', 20x MALLOC_OPTIONS=JJ OK)"
 
 # 08. lang/lua/5.4 (lua54, lua alias, and luac54 bytecode execution)
 cat > /tmp/ports_test.lua <<'LUA_EOF'

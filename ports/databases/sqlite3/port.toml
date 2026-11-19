@@ -8,6 +8,13 @@ cflags = [
     "-DSQLITE_ENABLE_COLUMN_METADATA",
 ]
 
+# Fix upstream SQLite LP64/WASM64 variadic UB in shell.c / src/shell.c.in where
+# 4-arg sqlite3_db_config(db, op, int_val, 0) passes 32-bit int 0 instead of
+# 64-bit pointer (int*)0 as the 4th va_arg(ap, int*) parameter.
+pre_configure = [
+    "python3 -c 'import pathlib, re; pat = re.compile(r\"(sqlite3_db_config\\s*\\([^,;]+,[^,;]+,[^,;]+,\\s*)0(\\s*\\))\"); total = 0\nfor rel in (\"shell.c\", \"src/shell.c.in\", \"tool/sqlite3_rsync.c\"):\n p = pathlib.Path(rel)\n if p.is_file():\n  s, n = pat.subn(r\"\\1(int*)0\\2\", p.read_text(encoding=\"utf-8\"))\n  p.write_text(s, encoding=\"utf-8\")\n  print(f\"  [sqlite3-va-fix] {rel}: patched {n} sqlite3_db_config(..., (int*)0) callsite(s)\")\n  total += n\nassert total >= 15, f\"expected >= 15 sqlite3_db_config variadic fixes, got {total}\"'",
+]
+
 configure_host = true
 configure_default_args = false
 configure_args = [
