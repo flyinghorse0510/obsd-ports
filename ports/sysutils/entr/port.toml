@@ -1,0 +1,16 @@
+port = "sysutils/entr"
+build_style = "make"
+use_gmake = false
+
+build_cmd = [
+    "make -f Makefile.bsd CC=\"$CC\" CFLAGS=\"$CFLAGS $CPPFLAGS\" LDFLAGS=\"$LDFLAGS\"",
+]
+
+install_cmd = [
+    "make -f Makefile.bsd install DESTDIR=\"$STAGE_DIR\" PREFIX=/usr/local MANPREFIX=/usr/local/man",
+]
+
+[[applets]]
+sym = "entr"
+binary = "/usr/local/bin/entr"
+paths = ["/usr/local/bin/entr"]

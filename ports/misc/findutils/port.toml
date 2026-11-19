@@ -1,0 +1,33 @@
+port = "misc/findutils"
+build_style = "gnu"
+use_gmake = true
+
+configure_args = [
+    "--program-prefix=g",
+    "--disable-nls",
+    "--without-selinux",
+    "--localstatedir=/var/db",
+]
+
+[env]
+PYTHON = ":"
+
+[[applets]]
+sym = "gfind"
+binary = "/usr/local/bin/gfind"
+paths = ["/usr/local/bin/gfind"]
+
+[[applets]]
+sym = "gxargs"
+binary = "/usr/local/bin/gxargs"
+paths = ["/usr/local/bin/gxargs"]
+
+[[applets]]
+sym = "glocate"
+binary = "/usr/local/bin/glocate"
+paths = ["/usr/local/bin/glocate"]
+
+[[applets]]
+sym = "gfrcode"
+binary = "/usr/local/libexec/gfrcode"
+paths = ["/usr/local/libexec/gfrcode"]

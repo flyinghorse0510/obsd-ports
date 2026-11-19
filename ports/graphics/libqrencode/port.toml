@@ -1,0 +1,17 @@
+port = "graphics/libqrencode"
+build_style = "gnu"
+separate_build = true
+use_gmake = true
+depends = ["graphics/png"]
+
+libs = ["-lpng", "-lz", "-lm", "-lpthread"]
+
+configure_args = [
+    "--with-tools",
+    "--without-tests",
+]
+
+[[applets]]
+sym = "qrencode"
+binary = "/usr/local/bin/qrencode"
+paths = ["/usr/local/bin/qrencode"]
