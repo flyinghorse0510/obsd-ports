@@ -999,7 +999,7 @@ def cmd_list(args: argparse.Namespace) -> int:
         pname = rec["port"]
         vdir = vendor_ports_dir / rec["vendor_port"]
         has_vendor = "imported" if (vdir / "distinfo").is_file() else "missing"
-        pkgname = get_port_pkgname(vendor_ports_dir, rec["vendor_port"]) if has_vendor == "imported" else "-"
+        pkgname = rec.get("pkgname") or (get_port_pkgname(vendor_ports_dir, rec["vendor_port"]) if has_vendor == "imported" else "-")
         stamp = lane_dir / ".stamps" / (pname.replace("/", "__") + ".json")
         status = "built" if stamp.is_file() else "pending"
         app_names = ",".join(a.get("sym", "") for a in rec.get("applets", [])) or "(lib)"

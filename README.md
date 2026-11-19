@@ -24,6 +24,68 @@ All build outputs isolate cleanly under `build/openbsd/<OPENBSD_VERSION>/<COMPAT
 
 `make clean` works standalone with zero external dependencies.
 
+## Built & Verified Ports Catalog (48 Ports across OpenBSD 7.8 & 7.9)
+
+All **48 ports** compile with `sdk/bin/obsd-cc` and `sdk/bin/obsd-c++` (including native WASM64 C++17/23 `libc++.a` + `libc++abi.a` with `-fwasm-exceptions` and per-exec constructor initialization) into **71 localized WASM64 applet closures** (**211** command paths on OpenBSD `7.8`, **207** command paths on OpenBSD `7.9`) plus static `.a` developer libraries, headers, `pkg-config` `.pc` metadata, configs, and manual pages:
+
+| Category & Port | OpenBSD 7.8 | OpenBSD 7.9 | Exported Applets, Wrappers & Static Libraries |
+| :--- | :--- | :--- | :--- |
+| **VCS, Build & Dev** | | | |
+| `devel/git` | `2.51.0` | `2.53.0` | `git`, `git-remote-http`/`https`/`ftp`/`ftps`, `git-{receive,upload}-pack`, `git-shell`, `libgit.a`, `/usr/local/etc/gitconfig` |
+| `devel/gmake` | `4.4.1` | `4.4.1` | `gmake` (POSIX pipe jobserver `-jN`) |
+| `devel/tig` | `2.6.0` | `2.6.0` | `tig` curses Git TUI, `/usr/local/etc/tigrc` |
+| `devel/universal-ctags` | `6.1.0` | `6.1.0` | `uctags`, `ureadtags` |
+| `devel/pcre2` | `10.44` | `10.44` | `pcre2grep`, `pcre2test`, `libpcre2-{8,16,32,posix}.a` |
+| `devel/pcre` | `8.45` | `8.45` | `pcregrep`, `pcretest`, `libpcre.a`, `libpcre16.a`, `libpcreposix.a` |
+| **Languages & Databases** | | | |
+| `lang/lua/5.4` | `5.4.7` | `5.4.8` | `lua54`, `lua`, `luac54`, `liblua5.4.a` |
+| `lang/quickjs` | `2024.01.13` | `2024.01.13` | `qjs`, `qjsc`, `libquickjs.a` |
+| `lang/jimtcl` | `0.80` | `0.81` | `jimsh`, `libjim.a` (with static SQLite3 + zlib extensions) |
+| `lang/gawk` | `5.1.0` | `5.4.0` | `gawk` |
+| `databases/sqlite3` | `3.50.4` | `3.51.3` | `sqlite3`, `libsqlite3.a` (FTS5 + JSON) |
+| **Editors & Terminal UI** | | | |
+| `editors/vim` | `9.1.1706` | `9.2.0357` | `vim`, `vimdiff`, `rvim`, `rview`, `xxd`, trimmed `share/vim` runtime |
+| `editors/nano` | `8.6` | `8.7.1` | `nano`, `rnano`, syntax highlighting rules |
+| `sysutils/ncdu` | `1.22` | `1.22` | `ncdu` curses disk usage analyzer |
+| **Search, Text, XML & Markdown** | | | |
+| `sysutils/ugrep` | `7.4.2` | `7.6.0` | `ugrep`, `ug`, `ugrep-indexer`, `ug+`/`ugrep+` (WASM64 C++ + PCRE2 + `-z` archive search) |
+| `textproc/the_silver_searcher` | `2.2.0` | `2.2.0` | `ag` |
+| `sysutils/ggrep` | `3.11` | `3.11` | `ggrep`, `gegrep`, `gfgrep` (PCRE2) |
+| `textproc/gsed` | `4.9` | `4.9` | `gsed` |
+| `textproc/jq` | `1.8.1` | `1.8.1` | `jq`, `libjq.a` |
+| `textproc/oniguruma` | `6.9.10` | `6.9.10` | `libonig.a` |
+| `textproc/lowdown` | `2.0.2` | `3.0.1` | `lowdown`, `lowdown-diff`, `liblowdown.a` |
+| `textproc/libxml` | `2.14.6` | `2.15.3` | `xmllint`, `xmlcatalog`, `libxml2.a` |
+| `converters/libiconv` | `1.17` | `1.19` | `iconv`, `libiconv.a`, `libcharset.a` |
+| `converters/dos2unix` | `7.5.2` | `7.5.5` | `dos2unix`, `mac2unix`, `unix2dos`, `unix2mac` |
+| **Networking, Web & Sync** | | | |
+| `net/curl` | `8.16.0` | `8.19.0` | `curl`, `wcurl`, `libcurl.a` (LibreSSL + `/etc/ssl/cert.pem` + zlib + zstd) |
+| `net/wget` | `1.25.0` | `1.25.0` | `wget`, `/usr/local/etc/wgetrc` (`ca_certificate = /etc/ssl/cert.pem`) |
+| `www/links` | `1.03` | `1.03` | `links` text web browser (TLS SNI + `/etc/ssl/cert.pem` verification) |
+| `net/rsync` | `3.4.1` | `3.4.1` | `rsync`, `rsync-ssl` (zstd + lz4 + xxh3 + iconv) |
+| `net/socat` | `1.7.4.1` | `1.7.4.1` | `socat`, `procan`, `filan` |
+| `net/iperf3` | `3.18` | `3.20` | `iperf3`, `libiperf.a` |
+| **Archivers & Checksums** | | | |
+| `archivers/bzip2` | `1.0.8` | `1.0.8` | `bzip2`, `bunzip2`, `bzcat`, `bzip2recover`, `bzgrep`, `libbz2.a` |
+| `archivers/xz` | `5.8.1` | `5.8.3` | `xz`, `unxz`, `xzcat`, `lzma`, `unlzma`, `lzcat`, `xzgrep`, `liblzma.a` |
+| `archivers/zstd` | `1.5.7` | `1.5.7` | `zstd`, `unzstd`, `zstdcat`, `zstdgrep`, `zstdmt`, `libzstd.a` |
+| `archivers/lz4` | `1.10.0` | `1.10.0` | `lz4`, `lz4c`, `lz4cat`, `unlz4`, `liblz4.a` |
+| `archivers/pigz` | `2.8` | `2.8` | `pigz`, `unpigz` (multi-threaded zlib) |
+| `archivers/zip` | `3.0` | `3.0` | `zip`, `zipcloak`, `zipnote`, `zipsplit` |
+| `archivers/unzip` | `6.0` | `6.0` | `unzip`, `zipinfo`, `funzip`, `unzipsfx`, `zipgrep` |
+| `archivers/gtar` | `1.35` | `1.35` | `gtar` |
+| `archivers/libarchive` | `3.8.1` | `3.8.7` | `bsdtar`, `bsdcpio`, `bsdcat`, `bsdunzip`, `libarchive.a` |
+| `archivers/p7zip` | `17.06` | `17.06` | `7z`, `7za`, `7zr` (WASM64 C++ with native Wasm exceptions) |
+| `sysutils/xxhash` | `0.8.3` | `0.8.3` | `xxhsum`, `xxh32sum`, `xxh64sum`, `xxh128sum`, `xxh3sum`, `libxxhash.a` |
+| **GNU Core/Find, Sysutils & Graphics** | | | |
+| `sysutils/coreutils` | `9.7` | `9.10` | Single-binary `gcoreutils` + `gls`, `gstat`, `gdate`, `gsha256sum`, `gb2sum`, `gsort`, `gshuf`, `grealpath`, `gnproc`, `ggid`, `ggod`, `ggpr`, ... (106 `g*` aliases on `7.8`, 102 on `7.9`) |
+| `misc/findutils` | `4.10.0` | `4.10.0` | `gfind`, `gxargs`, `glocate`, `gupdatedb`, `gfrcode` |
+| `sysutils/tree` | `0.62` | `0.62` | `tree` |
+| `sysutils/pv` | `1.9.34` | `1.10.5` | `pv` |
+| `sysutils/entr` | `5.7` | `5.7` | `entr` (`kqueue` + VFS `stat` fallback) |
+| `graphics/png` | `1.6.50` | `1.6.58` | `libpng.a`, `libpng16.a` |
+| `graphics/libqrencode` | `4.1.1` | `4.1.1` | `qrencode`, `libqrencode.a` |
+
 ## Quickstart & Top-Level Make Targets
 
 ```sh
@@ -35,6 +97,7 @@ make import PORT=textproc/jq
 
 # List declared port recipes under ports/ and their lane build status
 make list OPENBSD_VERSION=7.9
+make list OPENBSD_VERSION=7.8
 
 # Fetch & verify distfile SHA256 digests against vendor/.../distinfo
 make fetch OPENBSD_VERSION=7.9
@@ -48,7 +111,7 @@ make build OPENBSD_VERSION=7.8
 make package OPENBSD_VERSION=7.9
 make package OPENBSD_VERSION=7.8
 
-# Run SDK + WASM64 port verification suite
+# Run SDK + full 48-port WASM64 verification suites (Wave-1 + Foundation + Wave-2 Slices A-D)
 make check OPENBSD_VERSION=7.9
 make check OPENBSD_VERSION=7.8
 
@@ -63,4 +126,4 @@ make clean
 
 - [`docs/architecture.md`](docs/architecture.md) — Repository hierarchy, Make layers, vendor immutability, and output layout.
 - [`docs/port-recipes.md`](docs/port-recipes.md) — `ports/<category>/<name>/port.toml` recipe contract & examples.
-- [`docs/sdk-and-targets.md`](docs/sdk-and-targets.md) — `sdk/bin/obsd-*` cross-compiler flags, `config.site`, CMake toolchain, and `targets/` packaging adapters.
+- [`docs/sdk-and-targets.md`](docs/sdk-and-targets.md) — `sdk/bin/obsd-*` cross-compiler flags (`obsd-cc`, `obsd-c++`), `config.site`, CMake toolchain, and `targets/` packaging adapters.

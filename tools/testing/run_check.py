@@ -170,7 +170,38 @@ def main() -> int:
     if args.port and "--port" in help_txt:
         cmd.extend(["--port", args.port])
 
-    return subprocess.run(cmd, cwd=str(REPO_ROOT), env=env).returncode
+    rc_main = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env).returncode
+    if rc_main != 0:
+        return rc_main
+
+    if not args.port:
+        wave2_suites = [
+            "tests/wave2_dev.py",
+            "tests/wave2_search_gnu.py",
+            "tests/wave2_net_arch.py",
+            "tests/wave2_sys_tui.py",
+        ]
+        for rel_suite in wave2_suites:
+            sp_path = REPO_ROOT / rel_suite
+            if not sp_path.is_file():
+                continue
+            rc_w2 = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    str(sp_path),
+                    "--openbsd-version",
+                    args.openbsd_version,
+                    "--libobsdcompat-root",
+                    str(obsd_root),
+                ],
+                cwd=str(REPO_ROOT),
+                env=env,
+            ).returncode
+            if rc_w2 != 0:
+                return rc_w2
+
+    return 0
 
 
 if __name__ == "__main__":

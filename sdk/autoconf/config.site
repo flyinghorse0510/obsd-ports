@@ -55,7 +55,8 @@ curl_cv_send=yes
 curl_cv_func_recv_args="int,void *,size_t,int,ssize_t"
 curl_cv_func_send_args="int,const void *,size_t,int,ssize_t"
 
-# gnulib cross-compilation runtime probes (used by nano, xz, gmake, etc.)
+# gnulib cross-compilation runtime probes (used by nano, xz, gmake, ggrep, gsed, gawk, etc.)
+gl_cv_host_cpu_c_abi=wasm64
 gl_cv_func_printf_sizes_c99=yes
 gl_cv_func_printf_long_double=yes
 gl_cv_func_printf_infinite=yes
