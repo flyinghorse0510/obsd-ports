@@ -1,0 +1,45 @@
+port = "sysutils/ugrep"
+depends = [
+    "devel/pcre2",
+    "archivers/lz4",
+    "archivers/bzip2",
+    "archivers/xz",
+    "archivers/zstd",
+]
+build_style = "gnu"
+use_gmake = true
+
+configure_args = [
+    "--disable-avx2",
+    "--disable-sse2",
+    "--disable-neon",
+    "--without-boost-regex",
+    "--without-brotli",
+    "--without-bzip3",
+    "--with-pcre2=/usr/local",
+    "--with-zlib=/usr",
+    "--with-bzlib=/usr/local",
+    "--with-lzma=/usr/local",
+    "--with-lz4=/usr/local",
+    "--with-zstd=/usr/local",
+]
+
+[versions."7.9"]
+pre_configure = [
+    "autoreconf -fi",
+]
+
+[[applets]]
+sym = "ugrep"
+binary = "/usr/local/bin/ugrep"
+paths = [
+    "/usr/local/bin/ugrep",
+    "/usr/local/bin/ug",
+]
+
+[[applets]]
+sym = "ugrep_indexer"
+binary = "/usr/local/bin/ugrep-indexer"
+paths = [
+    "/usr/local/bin/ugrep-indexer",
+]

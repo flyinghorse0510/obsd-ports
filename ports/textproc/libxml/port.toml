@@ -1,0 +1,48 @@
+port = "textproc/libxml"
+depends = [
+    "converters/libiconv",
+    "archivers/xz",
+]
+build_style = "gnu"
+separate_build = true
+use_gmake = true
+
+configure_args = [
+    "--without-python",
+    "--without-readline",
+    "--without-history",
+    "--with-iconv=/usr/local",
+    "--with-lzma=/usr/local",
+    "--with-zlib=/usr",
+    "--with-legacy",
+]
+
+post_install = [
+    "rm -rf \"$STAGE_DIR/usr/local/share/doc/libxml2\" \"$STAGE_DIR/usr/local/share/gtk-doc\"",
+]
+
+[versions."7.8"]
+pkgname = "libxml-2.14.6"
+sites = [
+    "https://download.gnome.org/sources/libxml2/2.14/",
+]
+
+[versions."7.9"]
+pkgname = "libxml-2.15.3"
+sites = [
+    "https://download.gnome.org/sources/libxml2/2.15/",
+]
+
+[[applets]]
+sym = "xmllint"
+binary = "/usr/local/bin/xmllint"
+paths = [
+    "/usr/local/bin/xmllint",
+]
+
+[[applets]]
+sym = "xmlcatalog"
+binary = "/usr/local/bin/xmlcatalog"
+paths = [
+    "/usr/local/bin/xmlcatalog",
+]

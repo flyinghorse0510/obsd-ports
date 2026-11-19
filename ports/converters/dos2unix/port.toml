@@ -1,0 +1,41 @@
+port = "converters/dos2unix"
+build_style = "make"
+use_gmake = true
+
+make_args = [
+    "D2U_OS=openbsd",
+    "ENABLE_NLS=",
+    "STRIP=true",
+    "prefix=/usr/local",
+    "man1dir=/usr/local/man/man1",
+    "docsubdir=dos2unix",
+]
+
+install_args = [
+    "D2U_OS=openbsd",
+    "ENABLE_NLS=",
+    "STRIP=true",
+    "prefix=/usr/local",
+    "man1dir=/usr/local/man/man1",
+    "docsubdir=dos2unix",
+]
+
+post_install = [
+    "rm -rf \"$STAGE_DIR/usr/local/share/doc/dos2unix\" \"$STAGE_DIR/usr/local/share/man\"",
+]
+
+[[applets]]
+sym = "dos2unix"
+binary = "/usr/local/bin/dos2unix"
+paths = [
+    "/usr/local/bin/dos2unix",
+    "/usr/local/bin/mac2unix",
+]
+
+[[applets]]
+sym = "unix2dos"
+binary = "/usr/local/bin/unix2dos"
+paths = [
+    "/usr/local/bin/unix2dos",
+    "/usr/local/bin/unix2mac",
+]

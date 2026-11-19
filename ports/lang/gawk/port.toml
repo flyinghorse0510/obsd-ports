@@ -1,0 +1,29 @@
+port = "lang/gawk"
+build_style = "gnu"
+separate_build = true
+use_gmake = true
+
+configure_args = [
+    "--disable-nls",
+    "--without-gmp",
+    "--without-mpfr",
+    "--without-libsigsegv",
+    "--disable-extensions",
+]
+
+post_install = [
+    "rm -f \"$STAGE_DIR/usr/local/bin/awk\" \"$STAGE_DIR\"/usr/local/bin/gawk-*",
+    "if [ -f \"$STAGE_DIR/usr/local/bin/gawkbug\" ]; then sed -i '1s|^#!.*|#!/bin/sh|' \"$STAGE_DIR/usr/local/bin/gawkbug\"; fi",
+    "rm -rf \"$STAGE_DIR/etc/profile.d\"",
+]
+
+[env]
+ac_cv_path_XGETTEXT = ":"
+gl_cv_host_cpu_c_abi = "wasm64"
+
+[[applets]]
+sym = "gawk"
+binary = "/usr/local/bin/gawk"
+paths = [
+    "/usr/local/bin/gawk",
+]
