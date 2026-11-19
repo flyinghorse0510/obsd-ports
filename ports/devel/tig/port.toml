@@ -1,0 +1,22 @@
+port = "devel/tig"
+depends = ["devel/pcre2", "converters/libiconv"]
+build_style = "gnu"
+use_gmake = true
+
+configure_args = [
+    "--sysconfdir=/usr/local/etc",
+    "--with-ncurses",
+    "--with-libiconv=/usr/local",
+    "--with-pcre",
+    "DOCBOOK2PDF=false",
+]
+
+post_install = [
+    "obsd-install -d -m 0755 \"$STAGE_DIR/usr/local/man/man1\"",
+    "obsd-install -c -m 0444 doc/tig.1 \"$STAGE_DIR/usr/local/man/man1/tig.1\"",
+]
+
+[[applets]]
+sym = "tig"
+binary = "/usr/local/bin/tig"
+paths = ["/usr/local/bin/tig"]

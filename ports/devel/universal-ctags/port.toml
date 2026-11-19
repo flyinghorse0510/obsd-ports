@@ -1,0 +1,26 @@
+port = "devel/universal-ctags"
+depends = ["devel/pcre2", "converters/libiconv"]
+build_style = "gnu"
+use_gmake = true
+
+configure_args = [
+    "--program-prefix=u",
+    "--enable-pcre2",
+    "--enable-iconv",
+    "--disable-json",
+    "--disable-yaml",
+    "--disable-seccomp",
+    "--disable-xml",
+    "--disable-aspell",
+    "--disable-external-sort",
+]
+
+[[applets]]
+sym = "uctags"
+binary = "/usr/local/bin/uctags"
+paths = ["/usr/local/bin/uctags"]
+
+[[applets]]
+sym = "ureadtags"
+binary = "/usr/local/bin/ureadtags"
+paths = ["/usr/local/bin/ureadtags"]

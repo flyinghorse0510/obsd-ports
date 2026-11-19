@@ -1,0 +1,53 @@
+port = "lang/jimtcl"
+depends = ["databases/sqlite3"]
+build_style = "simple"
+configure_host = true
+configure_default_args = false
+use_gmake = true
+
+skip_vendor_patches = [
+    "patch-Makefile_in",
+    "patch-examples_api_Makefile_in",
+    "patch-examples_ext_Makefile",
+]
+
+pre_configure = [
+    "sed -i 's|\\${LOCALBASE}|/usr/local|g' initjimsh.tcl",
+]
+
+post_configure = [
+    "sed -i 's|-Wl,-rpath -Wl,[^ ]*||g' Makefile",
+]
+
+[env]
+ac_cv_func_backtrace = "no"
+
+[versions."7.8"]
+configure_args = [
+    "--prefix=/usr/local",
+    "--sysconfdir=/usr/local/etc",
+    "--mandir=/usr/local/man",
+    "--includedir=/usr/local/include/jim",
+    "--disable-docs",
+    "--full",
+    "--with-ext=sqlite3,zlib",
+    "CCACHE=none",
+]
+
+[versions."7.9"]
+configure_args = [
+    "--prefix=/usr/local",
+    "--sysconfdir=/usr/local/etc",
+    "--mandir=/usr/local/man",
+    "--includedir=/usr/local/include/jim",
+    "--disable-docs",
+    "--full",
+    "--compat",
+    "--with-ext=sqlite3,zlib",
+    "CCACHE=none",
+]
+
+[[applets]]
+sym = "jimsh"
+binary = "/usr/local/bin/jimsh"
+paths = ["/usr/local/bin/jimsh"]

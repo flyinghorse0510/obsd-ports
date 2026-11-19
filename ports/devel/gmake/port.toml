@@ -1,0 +1,19 @@
+port = "devel/gmake"
+build_style = "gnu"
+separate_build = true
+use_gmake = true
+
+configure_args = [
+    "--program-prefix=g",
+    "--without-guile",
+    "--disable-nls",
+    "--disable-load",
+]
+
+[env]
+ac_cv_func_mkfifo = "no"
+
+[[applets]]
+sym = "gmake"
+binary = "/usr/local/bin/gmake"
+paths = ["/usr/local/bin/gmake"]

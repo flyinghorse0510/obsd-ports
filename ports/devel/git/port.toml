@@ -1,0 +1,92 @@
+port = "devel/git"
+depends = ["net/curl", "converters/libiconv", "devel/pcre2"]
+build_style = "make"
+use_gmake = true
+
+make_args = [
+    "CC=obsd-cc",
+    "AR=obsd-ar",
+    "RANLIB=obsd-ranlib",
+    "STRIP=obsd-strip",
+    "LD=obsd-ld",
+    "prefix=/usr/local",
+    "sysconfdir=/usr/local/etc",
+    "mandir=/usr/local/man",
+    "gitexecdir=/usr/local/libexec/git",
+    "uname_S=OpenBSD",
+    "uname_M=wasm64",
+    "NO_PERL=YesPlease",
+    "NO_PYTHON=YesPlease",
+    "NO_TCLTK=YesPlease",
+    "NO_GETTEXT=YesPlease",
+    "USE_LIBPCRE2=YesPlease",
+    "LIBPCREDIR=/usr/local",
+    "ICONVDIR=/usr/local",
+    "CURLDIR=/usr/local",
+    "CURL_LDFLAGS=-lcurl -lzstd -lssl -lcrypto -lz",
+    "OPENSSLDIR=/usr",
+    "EXPATDIR=/usr",
+    "ZLIB_PATH=/usr",
+]
+
+install_args = [
+    "CC=obsd-cc",
+    "AR=obsd-ar",
+    "RANLIB=obsd-ranlib",
+    "STRIP=obsd-strip",
+    "LD=obsd-ld",
+    "prefix=/usr/local",
+    "sysconfdir=/usr/local/etc",
+    "mandir=/usr/local/man",
+    "gitexecdir=/usr/local/libexec/git",
+    "uname_S=OpenBSD",
+    "uname_M=wasm64",
+    "NO_PERL=YesPlease",
+    "NO_PYTHON=YesPlease",
+    "NO_TCLTK=YesPlease",
+    "NO_GETTEXT=YesPlease",
+    "USE_LIBPCRE2=YesPlease",
+    "LIBPCREDIR=/usr/local",
+    "ICONVDIR=/usr/local",
+    "CURLDIR=/usr/local",
+    "CURL_LDFLAGS=-lcurl -lzstd -lssl -lcrypto -lz",
+    "OPENSSLDIR=/usr",
+    "EXPATDIR=/usr",
+    "ZLIB_PATH=/usr",
+]
+
+post_install = [
+    "obsd-install -d -m 0755 \"$STAGE_DIR/usr/local/man/man1\" \"$STAGE_DIR/usr/local/lib\" \"$STAGE_DIR/usr/local/etc\"",
+    "obsd-install -c -m 0644 libgit.a \"$STAGE_DIR/usr/local/lib/libgit.a\"",
+    "obsd-install -c -m 0444 ../man1/git*.1 \"$STAGE_DIR/usr/local/man/man1/\"",
+    "printf '[http]\\n\\tsslCAInfo = /etc/ssl/cert.pem\\n' > \"$STAGE_DIR/usr/local/etc/gitconfig\"",
+    "chmod 0644 \"$STAGE_DIR/usr/local/etc/gitconfig\"",
+]
+
+[versions."7.8"]
+wrksrc_subdir = "git-2.51.0"
+
+[versions."7.9"]
+wrksrc_subdir = "git-2.53.0"
+
+[[applets]]
+sym = "git"
+binary = "/usr/local/bin/git"
+paths = [
+    "/usr/local/bin/git",
+    "/usr/local/bin/git-receive-pack",
+    "/usr/local/bin/git-shell",
+    "/usr/local/bin/git-upload-archive",
+    "/usr/local/bin/git-upload-pack",
+    "/usr/local/libexec/git/git",
+]
+
+[[applets]]
+sym = "git_remote_http"
+binary = "/usr/local/libexec/git/git-remote-http"
+paths = [
+    "/usr/local/libexec/git/git-remote-http",
+    "/usr/local/libexec/git/git-remote-https",
+    "/usr/local/libexec/git/git-remote-ftp",
+    "/usr/local/libexec/git/git-remote-ftps",
+]

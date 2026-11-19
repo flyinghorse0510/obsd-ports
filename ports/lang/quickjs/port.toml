@@ -1,0 +1,26 @@
+port = "lang/quickjs"
+build_style = "make"
+use_gmake = true
+
+build_cmd = [
+    "gmake -j\"$JOBS\" ./host-qjsc CROSS_PREFIX=obsd- HOST_CC=\"$HOSTCC\" LDFLAGS=\"\"",
+    "gmake -j\"$JOBS\" qjs qjsc libquickjs.a CROSS_PREFIX=obsd- CC=\"$CC\" AR=\"$AR\" STRIP=\"$STRIP\" HOST_CC=\"$HOSTCC\" QJSC=./host-qjsc QJSC_CC=cc LDEXPORT=\"\" CONFIG_LTO= CONFIG_SHARED_LIBS=",
+]
+
+install_cmd = [
+    "obsd-install -d -m 0755 \"$STAGE_DIR/usr/local/bin\" \"$STAGE_DIR/usr/local/lib/quickjs\" \"$STAGE_DIR/usr/local/include/quickjs\"",
+    "obsd-install -c -m 0755 qjs qjsc \"$STAGE_DIR/usr/local/bin/\"",
+    "obsd-install -c -m 0644 libquickjs.a \"$STAGE_DIR/usr/local/lib/quickjs/libquickjs.a\"",
+    "ln -sf quickjs/libquickjs.a \"$STAGE_DIR/usr/local/lib/libquickjs.a\"",
+    "obsd-install -c -m 0644 quickjs.h quickjs-libc.h \"$STAGE_DIR/usr/local/include/quickjs/\"",
+]
+
+[[applets]]
+sym = "qjs"
+binary = "/usr/local/bin/qjs"
+paths = ["/usr/local/bin/qjs"]
+
+[[applets]]
+sym = "qjsc"
+binary = "/usr/local/bin/qjsc"
+paths = ["/usr/local/bin/qjsc"]
