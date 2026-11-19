@@ -1,0 +1,42 @@
+port = "archivers/bzip2"
+build_style = "make"
+use_gmake = true
+
+make_targets = ["libbz2.a", "bzip2", "bzip2recover"]
+make_args = [
+    "CC=obsd-cc",
+    "AR=obsd-ar",
+    "RANLIB=obsd-ranlib",
+    "CFLAGS=-O2 -Wall -Winline -fomit-frame-pointer -D_FILE_OFFSET_BITS=64",
+    "SHLIB=",
+]
+
+install_cmd = [
+    "obsd-install -d -m 0755 \"$STAGE_DIR/usr/local/bin\" \"$STAGE_DIR/usr/local/lib\" \"$STAGE_DIR/usr/local/include\" \"$STAGE_DIR/usr/local/man/man1\" \"$STAGE_DIR/usr/local/share/doc/bzip2\"",
+    "obsd-install -c -m 0644 libbz2.a \"$STAGE_DIR/usr/local/lib/libbz2.a\"",
+    "obsd-install -c -m 0644 bzlib.h \"$STAGE_DIR/usr/local/include/bzlib.h\"",
+    "obsd-install -c -m 0755 bzip2 bzip2recover \"$STAGE_DIR/usr/local/bin/\"",
+    "obsd-install -c -m 0755 bzgrep bzmore bzdiff \"$STAGE_DIR/usr/local/bin/\"",
+    "ln -fs bzip2 \"$STAGE_DIR/usr/local/bin/bunzip2\" && ln -fs bzip2 \"$STAGE_DIR/usr/local/bin/bzcat\"",
+    "ln -fs bzgrep \"$STAGE_DIR/usr/local/bin/bzegrep\" && ln -fs bzgrep \"$STAGE_DIR/usr/local/bin/bzfgrep\"",
+    "ln -fs bzmore \"$STAGE_DIR/usr/local/bin/bzless\" && ln -fs bzdiff \"$STAGE_DIR/usr/local/bin/bzcmp\"",
+    "obsd-install -c -m 0444 bzip2.1 bzgrep.1 bzmore.1 bzdiff.1 \"$STAGE_DIR/usr/local/man/man1/\"",
+    "ln -fs bzip2.1 \"$STAGE_DIR/usr/local/man/man1/bunzip2.1\" && ln -fs bzip2.1 \"$STAGE_DIR/usr/local/man/man1/bzcat.1\" && ln -fs bzip2.1 \"$STAGE_DIR/usr/local/man/man1/bzip2recover.1\"",
+    "ln -fs bzgrep.1 \"$STAGE_DIR/usr/local/man/man1/bzegrep.1\" && ln -fs bzgrep.1 \"$STAGE_DIR/usr/local/man/man1/bzfgrep.1\"",
+    "ln -fs bzmore.1 \"$STAGE_DIR/usr/local/man/man1/bzless.1\" && ln -fs bzdiff.1 \"$STAGE_DIR/usr/local/man/man1/bzcmp.1\"",
+    "obsd-install -c -m 0644 manual.html \"$STAGE_DIR/usr/local/share/doc/bzip2/manual.html\"",
+]
+
+[[applets]]
+sym = "bzip2"
+binary = "/usr/local/bin/bzip2"
+paths = [
+    "/usr/local/bin/bzip2",
+    "/usr/local/bin/bunzip2",
+    "/usr/local/bin/bzcat",
+]
+
+[[applets]]
+sym = "bzip2recover"
+binary = "/usr/local/bin/bzip2recover"
+paths = ["/usr/local/bin/bzip2recover"]

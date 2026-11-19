@@ -1,0 +1,18 @@
+port = "textproc/jq"
+depends = ["textproc/oniguruma"]
+build_style = "gnu"
+use_gmake = true
+
+# Avoid patching tests/shtest for /usr/local/bin/bash when building cross binary
+skip_vendor_patches = ["patch-tests_shtest"]
+
+configure_args = [
+    "--with-oniguruma=yes",
+    "--disable-docs",
+    "--disable-valgrind",
+]
+
+[[applets]]
+sym = "jq"
+binary = "/usr/local/bin/jq"
+paths = ["/usr/local/bin/jq"]

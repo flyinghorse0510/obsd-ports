@@ -1,0 +1,27 @@
+port = "editors/nano"
+build_style = "gnu"
+use_gmake = true
+
+cppflags = [
+    "-D_XOPEN_SOURCE_EXTENDED",
+    "-DNCURSES_WIDECHAR=1",
+]
+
+configure_args = [
+    "--disable-nls",
+    "--disable-libmagic",
+    "--enable-utf8",
+    "--enable-nanorc",
+    "--enable-color",
+    "--enable-multibuffer",
+]
+
+post_install = [
+    "obsd-install -d -m 0755 \"$STAGE_DIR/usr/local/share/examples/nano\"",
+    "if [ -f \"$WRKBUILD/doc/sample.nanorc\" ]; then obsd-install -c -m 0644 \"$WRKBUILD/doc/sample.nanorc\" \"$STAGE_DIR/usr/local/share/examples/nano/sample.nanorc\"; fi",
+]
+
+[[applets]]
+sym = "nano"
+binary = "/usr/local/bin/nano"
+paths = ["/usr/local/bin/nano"]

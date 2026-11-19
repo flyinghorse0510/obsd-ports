@@ -1,0 +1,33 @@
+port = "net/curl"
+depends = ["archivers/zstd"]
+build_style = "gnu"
+separate_build = true
+use_gmake = true
+
+configure_args = [
+    "--with-openssl",
+    "--with-zlib",
+    "--with-zstd",
+    "--with-ca-bundle=/etc/ssl/cert.pem",
+    "--without-ca-path",
+    "--disable-ldap",
+    "--disable-ldaps",
+    "--disable-docs",
+    "--disable-manual",
+    "--without-brotli",
+    "--without-libgsasl",
+    "--without-libidn2",
+    "--without-libpsl",
+    "--without-libssh",
+    "--without-libssh2",
+    "--without-nghttp2",
+    "--without-nghttp3",
+    "--without-ngtcp2",
+    "--enable-ipv6",
+    "--enable-threaded-resolver",
+]
+
+[[applets]]
+sym = "curl"
+binary = "/usr/local/bin/curl"
+paths = ["/usr/local/bin/curl"]

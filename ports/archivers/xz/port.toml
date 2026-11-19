@@ -1,0 +1,22 @@
+port = "archivers/xz"
+build_style = "gnu"
+separate_build = true
+use_gmake = true
+
+configure_args = [
+    "--disable-nls",
+    "--disable-doc",
+    "--enable-external-sha256",
+]
+
+[[applets]]
+sym = "xz"
+binary = "/usr/local/bin/xz"
+paths = [
+    "/usr/local/bin/xz",
+    "/usr/local/bin/unxz",
+    "/usr/local/bin/xzcat",
+    "/usr/local/bin/lzma",
+    "/usr/local/bin/unlzma",
+    "/usr/local/bin/lzcat",
+]

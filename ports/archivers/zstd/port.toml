@@ -1,0 +1,29 @@
+port = "archivers/zstd"
+depends = ["archivers/xz"]
+build_style = "make"
+use_gmake = true
+
+cppflags = [
+    "-DMEM_FORCE_MEMORY_ACCESS=0",
+    "-DXXH_FORCE_MEMORY_ACCESS=0",
+    "-DZSTD_DISABLE_ASM=1",
+]
+
+build_cmd = [
+    "gmake -C lib -j\"$JOBS\" libzstd.a libzstd.pc ZSTD_NO_ASM=1 PREFIX=/usr/local",
+    "gmake -C programs -j\"$JOBS\" zstd ZSTD_NO_ASM=1 HAVE_ZLIB=1 HAVE_LZMA=1 HAVE_LZ4=0 PREFIX=/usr/local",
+]
+
+install_cmd = [
+    "gmake -C lib install-static install-pc install-includes ZSTD_NO_ASM=1 DESTDIR=\"$STAGE_DIR\" PREFIX=/usr/local",
+    "gmake -C programs install ZSTD_NO_ASM=1 DESTDIR=\"$STAGE_DIR\" PREFIX=/usr/local MANDIR=/usr/local/man",
+]
+
+[[applets]]
+sym = "zstd"
+binary = "/usr/local/bin/zstd"
+paths = [
+    "/usr/local/bin/zstd",
+    "/usr/local/bin/unzstd",
+    "/usr/local/bin/zstdcat",
+]

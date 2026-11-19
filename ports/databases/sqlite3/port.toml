@@ -1,0 +1,44 @@
+port = "databases/sqlite3"
+build_style = "simple"
+use_gmake = true
+
+cflags = [
+    "-DSQLITE_ENABLE_UNLOCK_NOTIFY",
+    "-DSQLITE_ENABLE_DBSTAT_VTAB",
+    "-DSQLITE_ENABLE_COLUMN_METADATA",
+]
+
+configure_host = true
+configure_default_args = false
+configure_args = [
+    "--prefix=/usr/local",
+    "--sysconfdir=/etc",
+    "--mandir=/usr/local/man",
+    "--disable-shared",
+    "--enable-static",
+    "--soname=none",
+    "--enable-all",
+    "--with-readline-ldflags=-ledit -lcurses",
+]
+
+make_args = [
+    "INSTALL.strip.0=obsd-install -c -m 0755",
+]
+
+[[applets]]
+sym = "sqlite3"
+binary = "/usr/local/bin/sqlite3"
+paths = ["/usr/local/bin/sqlite3"]
+
+[versions."7.9"]
+configure_args = [
+    "--prefix=/usr/local",
+    "--sysconfdir=/etc",
+    "--mandir=/usr/local/man",
+    "--disable-shared",
+    "--enable-static",
+    "--soname=none",
+    "--disable-tcl",
+    "--enable-all",
+    "--with-readline-ldflags=-ledit -lcurses",
+]

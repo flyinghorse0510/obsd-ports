@@ -1,0 +1,31 @@
+port = "lang/lua/5.4"
+build_style = "make"
+use_gmake = true
+
+# Build static liblua5.4.a + lua54 + luac54 cleanly on OpenBSD BSD profile
+build_cmd = [
+    "gmake -C src -j\"$JOBS\" liblua5.4.a lua54 luac54 CC=\"$CC\" AR=\"$AR rcu\" RANLIB=\"$RANLIB\" SYSCFLAGS=\"-DLUA_USE_BSD\" SYSLIBS=\"-ledit -lcurses\" MYLDFLAGS=\"-lm\"",
+]
+
+install_cmd = [
+    "obsd-install -d -m 0755 \"$STAGE_DIR/usr/local/bin\" \"$STAGE_DIR/usr/local/include/lua-5.4\" \"$STAGE_DIR/usr/local/lib/pkgconfig\" \"$STAGE_DIR/usr/local/man/man1\" \"$STAGE_DIR/usr/local/share/lua/5.4\" \"$STAGE_DIR/usr/local/lib/lua/5.4\"",
+    "obsd-install -c -m 0755 src/lua54 src/luac54 \"$STAGE_DIR/usr/local/bin/\"",
+    "ln -sf lua54 \"$STAGE_DIR/usr/local/bin/lua\"",
+    "obsd-install -c -m 0644 src/liblua5.4.a \"$STAGE_DIR/usr/local/lib/\"",
+    "obsd-install -c -m 0644 src/lua.h src/luaconf.h src/lualib.h src/lauxlib.h src/lua.hpp \"$STAGE_DIR/usr/local/include/lua-5.4/\"",
+    "obsd-install -c -m 0444 doc/lua.1 \"$STAGE_DIR/usr/local/man/man1/lua54.1\"",
+    "obsd-install -c -m 0444 doc/luac.1 \"$STAGE_DIR/usr/local/man/man1/luac54.1\"",
+]
+
+[[applets]]
+sym = "lua54"
+binary = "/usr/local/bin/lua54"
+paths = [
+    "/usr/local/bin/lua54",
+    "/usr/local/bin/lua",
+]
+
+[[applets]]
+sym = "luac54"
+binary = "/usr/local/bin/luac54"
+paths = ["/usr/local/bin/luac54"]

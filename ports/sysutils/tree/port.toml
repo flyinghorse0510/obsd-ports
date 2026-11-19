@@ -1,0 +1,18 @@
+port = "sysutils/tree"
+build_style = "make"
+use_gmake = true
+
+build_cmd = [
+    "\"$CC\" $CFLAGS $CPPFLAGS $LDFLAGS -Wall -Wstrict-prototypes -Wmissing-prototypes tree.c -o tree",
+]
+
+install_cmd = [
+    "obsd-install -d -m 0755 \"$STAGE_DIR/usr/local/bin\" \"$STAGE_DIR/usr/local/man/man1\"",
+    "obsd-install -c -m 0755 tree \"$STAGE_DIR/usr/local/bin/tree\"",
+    "obsd-install -c -m 0444 tree.1 \"$STAGE_DIR/usr/local/man/man1/tree.1\"",
+]
+
+[[applets]]
+sym = "tree"
+binary = "/usr/local/bin/tree"
+paths = ["/usr/local/bin/tree"]

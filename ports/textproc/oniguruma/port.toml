@@ -1,0 +1,4 @@
+port = "textproc/oniguruma"
+build_style = "gnu"
+separate_build = true
+use_gmake = true
