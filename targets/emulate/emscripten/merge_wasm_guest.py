@@ -84,6 +84,14 @@ HOST_RUNNER_C = r'''
 
 void vfs_device_init_all(void) {}
 
+extern int __real_posix_memalign(void **memptr, size_t alignment, size_t size);
+int
+__wrap_posix_memalign(void **memptr, size_t alignment, size_t size)
+{
+	size_t padded = (alignment == 4096U && size >= (16U << 20)) ? (size + 4096U) : size;
+	return __real_posix_memalign(memptr, alignment, padded);
+}
+
 extern int obsd_wasm_host_pipe(int fds[2], int nonblock);
 extern int obsd_wasm_host_dup(int host_fd);
 extern int obsd_wasm_host_close(int host_fd);
@@ -654,6 +662,7 @@ def build_and_cache_test_runtime(
             "-O2",
             "--profiling-funcs",
             "-Wno-pthreads-mem-growth",
+            "-Wl,--wrap=posix_memalign",
             "-sMODULARIZE=1",
             "-sEXPORT_ES6=1",
             "-sENVIRONMENT=node",

@@ -347,6 +347,149 @@ def test_cxx17_build_localize_and_run(openbsd_version: str, obsd_root: pathlib.P
     print(f"[SDK-TEST] [{openbsd_version}] obsd-c++ C++17 build + localize + WASM64 guest execution: PASS")
 
 
+CHUNK_OREALLOC_PROBE_SRC = r'''
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/*
+ * Regression test for adjacent 16 MiB WASM backing-chunk boundary coalescing:
+ * Allocates >20 MiB across multiple 16 MiB backing chunks while repeatedly
+ * doubling multi-page allocations (4 KiB -> 8 KiB -> ... -> 128 KiB) via
+ * realloc() so OpenBSD omalloc's orealloc() attempts in-place MAP_FIXED |
+ * __MAP_NOREPLACE extensions at every chunk tail, then verifies data integrity
+ * and munmap() via free() under MALLOC_OPTIONS=JJ.
+ */
+#define SLOT_COUNT 224
+
+int main(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    uint8_t *slots[SLOT_COUNT];
+    size_t sizes[SLOT_COUNT];
+
+    for (int i = 0; i < SLOT_COUNT; i++) {
+        sizes[i] = 4096U;
+        slots[i] = (uint8_t *)malloc(sizes[i]);
+        if (!slots[i]) {
+            fprintf(stderr, "malloc slot %d failed\n", i);
+            return 2;
+        }
+        memset(slots[i], (uint8_t)((i * 37 + 11) & 0xff), sizes[i]);
+    }
+
+    for (size_t target_sz = 8192U; target_sz <= 131072U; target_sz *= 2U) {
+        for (int i = 0; i < SLOT_COUNT; i++) {
+            uint8_t expected = (uint8_t)((i * 37 + 11) & 0xff);
+            uint8_t *grown = (uint8_t *)realloc(slots[i], target_sz);
+            if (!grown) {
+                fprintf(stderr, "realloc slot %d to %zu failed\n", i, target_sz);
+                return 3;
+            }
+            if (grown[0] != expected || grown[sizes[i] - 1] != expected) {
+                fprintf(stderr, "realloc data corruption at slot %d\n", i);
+                return 4;
+            }
+            memset(grown + sizes[i], expected, target_sz - sizes[i]);
+            slots[i] = grown;
+            sizes[i] = target_sz;
+        }
+    }
+
+    size_t total_bytes = 0;
+    for (int i = 0; i < SLOT_COUNT; i++) {
+        uint8_t expected = (uint8_t)((i * 37 + 11) & 0xff);
+        if (slots[i][0] != expected || slots[i][sizes[i] - 1] != expected) {
+            fprintf(stderr, "final verify failed at slot %d\n", i);
+            return 5;
+        }
+        total_bytes += sizes[i];
+        free(slots[i]);
+    }
+
+    printf("CHUNK_OREALLOC_OK=%zu\n", total_bytes);
+    return 0;
+}
+'''
+
+
+def test_chunk_boundary_orealloc_guard(openbsd_version: str, obsd_root: pathlib.Path) -> None:
+    obsd_cc = REPO_ROOT / "sdk/bin/obsd-cc"
+    wasm_obj_tool = obsd_root / "tools/build/personalities/openbsd/backends/emulate/wasm_object_tool.py"
+    merge_guest_py = REPO_ROOT / "targets/emulate/emscripten/merge_wasm_guest.py"
+
+    env = dict(os.environ)
+    env["OPENBSD_VERSION"] = openbsd_version
+    env["LIBOBSDCOMPAT_ROOT"] = str(obsd_root)
+
+    with tempfile.TemporaryDirectory(prefix=f"obsd-test-orealloc-{openbsd_version}-") as td:
+        tp = pathlib.Path(td)
+        lane_dir = tp / "lane"
+        (lane_dir / "applets").mkdir(parents=True)
+        (lane_dir / "sysroot/usr/local").mkdir(parents=True)
+
+        probe_c = tp / "probe_orealloc.c"
+        probe_bin = tp / "probe_orealloc"
+        probe_loc = lane_dir / "applets/orealloc_probe.o"
+        probe_c.write_text(CHUNK_OREALLOC_PROBE_SRC, encoding="utf-8")
+        subprocess.run(
+            [str(obsd_cc), "-O2", "-Wall", "-Wextra", str(probe_c), "-o", str(probe_bin)],
+            env=env,
+            check=True,
+        )
+        subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                str(wasm_obj_tool),
+                "localize-applet",
+                "--applet-sym",
+                "orealloc_probe",
+                "--entry-symbol",
+                "__main_argc_argv",
+                "-i",
+                str(probe_bin),
+                "-o",
+                str(probe_loc),
+            ],
+            env=env,
+            check=True,
+        )
+        (lane_dir / "ports-applets.tsv").write_text(
+            "orealloc_probe\t/usr/local/bin/orealloc_probe\tobsd_applet_orealloc_probe_main\tapplets/orealloc_probe.o\n",
+            encoding="utf-8",
+        )
+
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                str(merge_guest_py),
+                "run-guest",
+                "--libobsdcompat-root",
+                str(obsd_root),
+                "--openbsd-version",
+                openbsd_version,
+                "--ports-lane-dir",
+                str(lane_dir),
+                "--cmd",
+                "MALLOC_OPTIONS=JJ /usr/local/bin/orealloc_probe",
+            ],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        if proc.returncode != 0:
+            raise AssertionError(f"orealloc guard test failed (rc={proc.returncode}):\n{proc.stdout}")
+        expected_line = f"CHUNK_OREALLOC_OK={224 * 131072}"
+        if expected_line not in proc.stdout.splitlines():
+            raise AssertionError(f"missing '{expected_line}' in output:\n{proc.stdout}")
+
+    print(f"[SDK-TEST] [{openbsd_version}] 16 MiB chunk guard gap multi-page orealloc+free (28 MiB, MALLOC_OPTIONS=JJ): PASS")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--openbsd-version", default=os.environ.get("OPENBSD_VERSION", "all"))
@@ -361,6 +504,7 @@ def main() -> int:
     for ver in versions:
         test_symlink_alias_discovery(ver, obsd_root)
         test_cxx17_build_localize_and_run(ver, obsd_root)
+        test_chunk_boundary_orealloc_guard(ver, obsd_root)
 
     return 0
 
