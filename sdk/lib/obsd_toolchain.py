@@ -389,8 +389,7 @@ def build_guest_compile_flags(ctx: ToolchainContext, is_cxx: bool, preprocess_on
             str(gen_dir),
             "-isystem",
             str(ctx.include_root),
-            "-include",
-            str(wasm_compat_h),
+            *(["-include", str(wasm_compat_h)] if not preprocess_only else []),
             "-idirafter",
             ctx.clang_resource_include(),
         ]
