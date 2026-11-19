@@ -1,0 +1,18 @@
+port = "sysutils/pv"
+build_style = "gnu"
+use_gmake = true
+
+cppflags = [
+    "-D_XOPEN_SOURCE_EXTENDED",
+    "-DNCURSES_WIDECHAR=1",
+]
+
+configure_args = [
+    "--disable-nls",
+    "--disable-ipc",
+]
+
+[[applets]]
+sym = "pv"
+binary = "/usr/local/bin/pv"
+paths = ["/usr/local/bin/pv"]

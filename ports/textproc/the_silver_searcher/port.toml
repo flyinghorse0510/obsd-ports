@@ -1,0 +1,19 @@
+port = "textproc/the_silver_searcher"
+depends = [
+    "devel/pcre",
+    "archivers/xz",
+]
+build_style = "gnu"
+separate_build = true
+use_gmake = true
+
+install_args = [
+    "bashcompdir=/usr/local/share/bash-completion/completions",
+]
+
+[[applets]]
+sym = "ag"
+binary = "/usr/local/bin/ag"
+paths = [
+    "/usr/local/bin/ag",
+]

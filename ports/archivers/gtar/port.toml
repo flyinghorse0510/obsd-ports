@@ -1,0 +1,27 @@
+port = "archivers/gtar"
+build_style = "gnu"
+separate_build = true
+use_gmake = true
+
+pre_configure = [
+    "touch -r \"$WRKSRC/doc/stamp-vti\" \"$WRKSRC/configure\"",
+]
+
+configure_args = [
+    "--program-prefix=g",
+    "--disable-nls",
+    "--without-selinux",
+    "--without-posix-acls",
+    "--without-xattrs",
+]
+
+[env]
+gl_cv_func_mknod_works = "no"
+MAKEINFO = "true"
+DEFAULT_ARCHIVE = "/dev/rst0"
+DEFAULT_RMT_COMMAND = "/etc/rmt"
+
+[[applets]]
+sym = "gtar"
+binary = "/usr/local/bin/gtar"
+paths = ["/usr/local/bin/gtar"]

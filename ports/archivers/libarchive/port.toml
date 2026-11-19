@@ -1,0 +1,50 @@
+port = "archivers/libarchive"
+depends = [
+    "archivers/bzip2",
+    "archivers/xz",
+    "archivers/zstd",
+    "archivers/lz4",
+    "converters/libiconv",
+]
+build_style = "gnu"
+separate_build = true
+use_gmake = true
+
+configure_args = [
+    "--without-xml2",
+    "--without-nettle",
+    "--without-libb2",
+    "--without-cng",
+    "--enable-bsdtar=static",
+    "--enable-bsdcpio=static",
+    "--enable-bsdcat=static",
+    "--enable-bsdunzip=static",
+]
+
+post_install = [
+    "obsd-ar d \"$STAGE_DIR/usr/local/lib/libarchive.a\" libiconv.a 2>/dev/null || true",
+    "obsd-ranlib \"$STAGE_DIR/usr/local/lib/libarchive.a\"",
+]
+
+[env]
+ac_cv_header_ext2fs_ext2_fs_h = "no"
+
+[[applets]]
+sym = "bsdtar"
+binary = "/usr/local/bin/bsdtar"
+paths = ["/usr/local/bin/bsdtar"]
+
+[[applets]]
+sym = "bsdcpio"
+binary = "/usr/local/bin/bsdcpio"
+paths = ["/usr/local/bin/bsdcpio"]
+
+[[applets]]
+sym = "bsdcat"
+binary = "/usr/local/bin/bsdcat"
+paths = ["/usr/local/bin/bsdcat"]
+
+[[applets]]
+sym = "bsdunzip"
+binary = "/usr/local/bin/bsdunzip"
+paths = ["/usr/local/bin/bsdunzip"]

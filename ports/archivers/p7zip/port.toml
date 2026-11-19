@@ -1,0 +1,32 @@
+port = "archivers/p7zip"
+depends = ["converters/libiconv"]
+build_style = "make"
+use_gmake = true
+
+pre_build = [
+    "cp -f \"$WRKSRC/makefile.openbsd\" \"$WRKSRC/makefile.machine\"",
+]
+
+build_cmd = [
+    "gmake -f makefile -j\"$JOBS\" 7za 7zr MYCC=\"$CC\" MYCXX=\"$CXX\" MYCFLAGS=\"$CFLAGS -I$STAGE_DIR/usr/local/include\" MYCXXFLAGS=\"$CXXFLAGS -I$STAGE_DIR/usr/local/include\" LDFLAGS=\"$LDFLAGS\" LOCAL_LIBS=\"-L$STAGE_DIR/usr/local/lib -liconv -lpthread\"",
+]
+
+install_cmd = [
+    "obsd-install -d -m 0755 \"$STAGE_DIR/usr/local/bin\" \"$STAGE_DIR/usr/local/man/man1\"",
+    "obsd-install -c -m 0755 bin/7za bin/7zr \"$STAGE_DIR/usr/local/bin/\"",
+    "ln -sf 7za \"$STAGE_DIR/usr/local/bin/7z\"",
+    "obsd-install -c -m 0444 man1/7z.1 man1/7za.1 man1/7zr.1 \"$STAGE_DIR/usr/local/man/man1/\"",
+]
+
+[[applets]]
+sym = "p7zip_7za"
+binary = "/usr/local/bin/7za"
+paths = [
+    "/usr/local/bin/7za",
+    "/usr/local/bin/7z",
+]
+
+[[applets]]
+sym = "p7zip_7zr"
+binary = "/usr/local/bin/7zr"
+paths = ["/usr/local/bin/7zr"]

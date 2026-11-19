@@ -1,0 +1,17 @@
+port = "sysutils/ncdu"
+build_style = "gnu"
+use_gmake = true
+
+cppflags = [
+    "-D_XOPEN_SOURCE_EXTENDED",
+    "-DNCURSES_WIDECHAR=1",
+]
+
+configure_args = [
+    "--with-ncursesw",
+]
+
+[[applets]]
+sym = "ncdu"
+binary = "/usr/local/bin/ncdu"
+paths = ["/usr/local/bin/ncdu"]

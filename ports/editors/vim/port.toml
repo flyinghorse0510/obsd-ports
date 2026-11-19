@@ -1,0 +1,90 @@
+port = "editors/vim"
+build_style = "gnu"
+use_gmake = true
+depends = ["converters/libiconv"]
+
+cppflags = [
+    "-D_XOPEN_SOURCE_EXTENDED",
+    "-DNCURSES_WIDECHAR=1",
+]
+
+libs = ["-liconv"]
+
+configure_args = [
+    "--with-features=huge",
+    "--disable-gui",
+    "--without-x",
+    "--without-wayland",
+    "--disable-nls",
+    "--disable-libsodium",
+    "--disable-canberra",
+    "--disable-acl",
+    "--disable-selinux",
+    "--disable-gpm",
+    "--disable-sysmouse",
+    "--disable-netbeans",
+    "--with-tlib=curses",
+    "--enable-multibyte",
+    "--enable-cscope",
+]
+
+make_args = ["STRIP=:"]
+install_args = ["STRIP=:"]
+
+pre_configure = [
+    "touch \"$WRKSRC/src/auto/configure\"",
+]
+
+post_configure = [
+    "touch \"$WRKSRC/src/auto/config.mk\"",
+]
+
+post_install = [
+    "rm -f \"$STAGE_DIR/usr/local/bin/ex\" \"$STAGE_DIR/usr/local/bin/view\" \"$STAGE_DIR/usr/local/bin/eview\" \"$STAGE_DIR/usr/local/bin/evim\" \"$STAGE_DIR/usr/local/bin/gview\" \"$STAGE_DIR/usr/local/bin/gvim\" \"$STAGE_DIR/usr/local/bin/gvimdiff\" \"$STAGE_DIR/usr/local/bin/rgview\" \"$STAGE_DIR/usr/local/bin/rgvim\" \"$STAGE_DIR/usr/local/bin/vimtutor\" \"$STAGE_DIR/usr/local/bin/gvimtutor\"",
+    "obsd-install -d -m 0755 \"$STAGE_DIR/usr/local/share/vim/vimfiles/doc\" \"$STAGE_DIR/usr/local/share/vim/vimfiles/syntax\"",
+    "if [ -f \"$VENDOR_PORT_DIR/files/openbsd.vim\" ]; then obsd-install -c -m 0644 \"$VENDOR_PORT_DIR/files/openbsd.vim\" \"$STAGE_DIR/usr/local/share/vim/vimfiles/syntax/openbsd.vim\"; fi",
+    "for rt in \"$STAGE_DIR\"/usr/local/share/vim/vim[0-9]*; do [ -d \"$rt\" ] || continue; if ls \"$WRKSRC\"/../colorschemes-*/legacy_colors/* >/dev/null 2>&1; then obsd-install -d -m 0755 \"$rt/colors/legacy\"; obsd-install -c -m 0644 \"$WRKSRC\"/../colorschemes-*/legacy_colors/* \"$rt/colors/legacy/\"; fi; rm -rf \"$rt/spell\" \"$rt/tutor\" \"$rt/lang\" \"$rt/keymap\" \"$rt/print\" \"$rt/tools\" \"$rt/macros\" \"$rt/pack\"; find \"$rt/doc\" -maxdepth 1 -type f \\( -name '*.??x' -o -name 'tags-??' \\) ! -name '*.txt' -delete 2>/dev/null || true; done",
+    "find \"$STAGE_DIR/usr/local/man\" -mindepth 1 -maxdepth 1 -type d ! -name 'man*' -exec rm -rf {} + 2>/dev/null || true",
+    "rm -f \"$STAGE_DIR\"/usr/local/man/man1/{e,g,rg}{view,vim,vimdiff}.1 \"$STAGE_DIR/usr/local/man/man1/evim.1\" \"$STAGE_DIR/usr/local/man/man1/vimtutor.1\" \"$STAGE_DIR/usr/local/man/man1/ex.1\" \"$STAGE_DIR/usr/local/man/man1/view.1\"",
+]
+
+[env]
+ac_cv_lib_elf_main = "no"
+vim_cv_uname_output = "OpenBSD"
+vim_cv_uname_m_output = "wasm64"
+vim_cv_ipv4_networking = "yes"
+vim_cv_ipv6_networking = "yes"
+vim_cv_toupper_broken = "no"
+vim_cv_terminfo = "yes"
+vim_cv_tgetent = "zero"
+vim_cv_getcwd_broken = "no"
+vim_cv_stat_ignores_slash = "no"
+vim_cv_memmove_handles_overlap = "yes"
+vim_cv_bcopy_handles_overlap = "yes"
+vim_cv_memcpy_handles_overlap = "no"
+vim_cv_timer_create = "no"
+vim_cv_timer_create_with_lrt = "no"
+vim_cv_timer_create_works = "no"
+
+[versions."7.8"]
+pkgname = "vim-9.1.1706"
+wrksrc_subdir = "vim-9.1.1706"
+
+[versions."7.9"]
+pkgname = "vim-9.2.0357"
+wrksrc_subdir = "vim-9.2.0357"
+
+[[applets]]
+sym = "vim"
+binary = "/usr/local/bin/vim"
+paths = [
+    "/usr/local/bin/vim",
+    "/usr/local/bin/vimdiff",
+    "/usr/local/bin/rvim",
+    "/usr/local/bin/rview",
+]
+
+[[applets]]
+sym = "xxd"
+binary = "/usr/local/bin/xxd"
+paths = ["/usr/local/bin/xxd"]

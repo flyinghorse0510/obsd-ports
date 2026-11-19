@@ -1,0 +1,32 @@
+port = "sysutils/coreutils"
+build_style = "gnu"
+use_gmake = true
+
+configure_args = [
+    "--program-prefix=g",
+    "--enable-single-binary=symlinks",
+    "--disable-nls",
+    "--without-libgmp",
+    "--without-selinux",
+    "--disable-acl",
+    "--without-openssl",
+]
+
+pre_configure = [
+    "python3 \"$PORT_DIR/patch_multicall.py\"",
+]
+
+post_install = [
+    "for i in gid god gpr; do if [ -e \"$STAGE_DIR/usr/local/bin/$i\" ] || [ -L \"$STAGE_DIR/usr/local/bin/$i\" ]; then mv \"$STAGE_DIR/usr/local/bin/$i\" \"$STAGE_DIR/usr/local/bin/g$i\"; fi; if [ -f \"$STAGE_DIR/usr/local/man/man1/$i.1\" ]; then mv \"$STAGE_DIR/usr/local/man/man1/$i.1\" \"$STAGE_DIR/usr/local/man/man1/g$i.1\"; fi; done",
+    "rm -rf \"$STAGE_DIR/usr/local/libexec/coreutils\"",
+]
+
+[env]
+gl_cv_func_mknod_works = "no"
+FORCE_UNSAFE_CONFIGURE = "1"
+
+[[applets]]
+sym = "coreutils"
+binary = "/usr/local/bin/gcoreutils"
+paths = ["/usr/local/bin/gcoreutils"]
+discover_symlink_aliases_in = ["/usr/local/bin"]

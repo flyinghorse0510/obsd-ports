@@ -1,0 +1,34 @@
+port = "archivers/zip"
+depends = ["archivers/bzip2"]
+build_style = "make"
+use_gmake = true
+
+build_cmd = [
+    "gmake -f unix/Makefile -j\"$JOBS\" generic CC=\"$CC -std=gnu89 -Wno-implicit-function-declaration -Wno-implicit-int -Wno-deprecated-non-prototype\" CPP=\"$CC -E\" CFLAGS_NOOPT=\"$CFLAGS -I. -DUNIX -DLARGE_FILE_SUPPORT -DUIDGID_NOT_16BIT\"",
+]
+
+install_cmd = [
+    "obsd-install -d -m 0755 \"$STAGE_DIR/usr/local/bin\" \"$STAGE_DIR/usr/local/man/man1\"",
+    "obsd-install -c -m 0755 zip zipcloak zipnote zipsplit \"$STAGE_DIR/usr/local/bin/\"",
+    "obsd-install -c -m 0444 man/zip.1 man/zipcloak.1 man/zipnote.1 man/zipsplit.1 \"$STAGE_DIR/usr/local/man/man1/\"",
+]
+
+[[applets]]
+sym = "zip"
+binary = "/usr/local/bin/zip"
+paths = ["/usr/local/bin/zip"]
+
+[[applets]]
+sym = "zipcloak"
+binary = "/usr/local/bin/zipcloak"
+paths = ["/usr/local/bin/zipcloak"]
+
+[[applets]]
+sym = "zipnote"
+binary = "/usr/local/bin/zipnote"
+paths = ["/usr/local/bin/zipnote"]
+
+[[applets]]
+sym = "zipsplit"
+binary = "/usr/local/bin/zipsplit"
+paths = ["/usr/local/bin/zipsplit"]

@@ -1,0 +1,38 @@
+port = "net/socat"
+build_style = "gnu"
+use_gmake = true
+
+pre_configure = [
+    "sed -i 's,\\${LOCALBASE},/usr/local,g' \"$WRKSRC/doc/socat.1\" \"$WRKSRC/doc/socat.html\"",
+]
+
+configure_args = [
+    "--disable-libwrap",
+]
+
+post_configure = [
+    "sed -i -e 's/^#define HAVE_DEV_PTMX.*/\\/\\* #undef HAVE_DEV_PTMX \\*\\//' -e 's/^#define HAVE_PROC_DIR.*/\\/\\* #undef HAVE_PROC_DIR \\*\\//' -e 's/^#define HAVE_PROC_DIR_FD.*/\\/\\* #undef HAVE_PROC_DIR_FD \\*\\//' \"$WRKBUILD/config.h\"",
+]
+
+[env]
+ac_cv_have_c99_snprintf = "yes"
+ac_cv_have_z_modifier = "no"
+sc_cv_sys_crdly_shift = "-1"
+sc_cv_sys_tabdly_shift = "-1"
+sc_cv_sys_csize_shift = "8"
+sc_cv_termios_ispeed = "no"
+
+[[applets]]
+sym = "socat"
+binary = "/usr/local/bin/socat"
+paths = ["/usr/local/bin/socat"]
+
+[[applets]]
+sym = "procan"
+binary = "/usr/local/bin/procan"
+paths = ["/usr/local/bin/procan"]
+
+[[applets]]
+sym = "filan"
+binary = "/usr/local/bin/filan"
+paths = ["/usr/local/bin/filan"]

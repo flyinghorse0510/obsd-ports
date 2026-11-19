@@ -1,0 +1,21 @@
+port = "textproc/gsed"
+build_style = "gnu"
+separate_build = true
+use_gmake = true
+
+configure_args = [
+    "--program-prefix=g",
+    "--disable-nls",
+    "--disable-acl",
+    "--without-selinux",
+]
+
+[env]
+gl_cv_host_cpu_c_abi = "wasm64"
+
+[[applets]]
+sym = "gsed"
+binary = "/usr/local/bin/gsed"
+paths = [
+    "/usr/local/bin/gsed",
+]

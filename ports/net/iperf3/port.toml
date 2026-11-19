@@ -1,0 +1,14 @@
+port = "net/iperf3"
+build_style = "gnu"
+separate_build = true
+use_gmake = true
+
+configure_args = [
+    "--with-openssl=no",
+    "--disable-profiling",
+]
+
+[[applets]]
+sym = "iperf3"
+binary = "/usr/local/bin/iperf3"
+paths = ["/usr/local/bin/iperf3"]

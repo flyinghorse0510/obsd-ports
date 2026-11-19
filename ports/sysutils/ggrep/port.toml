@@ -1,0 +1,28 @@
+port = "sysutils/ggrep"
+depends = [
+    "devel/pcre2",
+]
+build_style = "gnu"
+separate_build = true
+use_gmake = true
+
+configure_args = [
+    "--program-prefix=g",
+    "--disable-nls",
+]
+
+post_install = [
+    "sed -i '1s|^#!.*|#!/bin/sh|' \"$STAGE_DIR/usr/local/bin/gegrep\" \"$STAGE_DIR/usr/local/bin/gfgrep\"",
+]
+
+[env]
+POSIX_SHELL = "/bin/sh"
+ac_cv_libsigsegv = "no"
+gl_cv_host_cpu_c_abi = "wasm64"
+
+[[applets]]
+sym = "ggrep"
+binary = "/usr/local/bin/ggrep"
+paths = [
+    "/usr/local/bin/ggrep",
+]
