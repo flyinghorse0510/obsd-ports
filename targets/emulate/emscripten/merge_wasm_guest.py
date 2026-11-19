@@ -66,6 +66,8 @@ MINIMAL_BASE_SYMS = {
     "which",
     "pwd_mkdb",
     "chroot",
+    "ftp",
+    "nc",
 }
 
 HOST_RUNNER_C = r'''
@@ -85,7 +87,7 @@ void vfs_device_init_all(void) {}
 extern int obsd_wasm_host_pipe(int fds[2], int nonblock);
 extern int obsd_wasm_host_close(int host_fd);
 extern ssize_t obsd_wasm_host_read(int host_fd, void *buf, size_t len);
-extern void obsd_wasm_net_attach_shm(void *ring_ptr);
+__attribute__((weak)) uintptr_t obsd_wasm_svnp_shm_addr(void);
 
 static int g_out_pipe[2] = { -1, -1 };
 static int g_in_pipe[2] = { -1, -1 };
@@ -94,7 +96,6 @@ static volatile int g_wait_status = -1;
 static volatile uint32_t g_embed_error = 0;
 static volatile uint32_t g_embed_stage = 0;
 static uint8_t g_io_buf[32768];
-static _Alignas(64) uint8_t g_svnp_shm[2 * 1024 * 1024];
 
 static void *
 ports_runner_thread(void *arg)
@@ -153,13 +154,15 @@ ports_runner_thread(void *arg)
 EMSCRIPTEN_KEEPALIVE uint32_t
 ports_svnp_shm_lo(void)
 {
-	return (uint32_t)((uintptr_t)g_svnp_shm & 0xffffffffu);
+	uintptr_t p = obsd_wasm_svnp_shm_addr ? obsd_wasm_svnp_shm_addr() : 0U;
+	return (uint32_t)(p & 0xffffffffu);
 }
 
 EMSCRIPTEN_KEEPALIVE uint32_t
 ports_svnp_shm_hi(void)
 {
-	return (uint32_t)(((uint64_t)(uintptr_t)g_svnp_shm) >> 32);
+	uint64_t p = (uint64_t)(obsd_wasm_svnp_shm_addr ? obsd_wasm_svnp_shm_addr() : 0U);
+	return (uint32_t)(p >> 32);
 }
 
 EMSCRIPTEN_KEEPALIVE uint32_t
@@ -171,8 +174,7 @@ ports_io_buf_addr(void)
 EMSCRIPTEN_KEEPALIVE int
 ports_start(int enable_svnp)
 {
-	if (enable_svnp)
-		obsd_wasm_net_attach_shm(g_svnp_shm);
+	(void)enable_svnp;
 	(void)setenv("LIBOBSDCOMPAT_VFS_PROFILE", "/bsd/vfs.profile", 1);
 	(void)setenv("LIBOBSDCOMPAT_FAKEROOT_DB", "/bsd/persist/fakeroot.db", 1);
 	(void)setenv("LIBOBSDCOMPAT_QUIET_NOOP_CAPS", "1", 1);
@@ -222,7 +224,10 @@ ports_embed_error(void)
 
 
 def find_node(obsd_root: pathlib.Path) -> str:
-    emsdk_nodes = sorted((obsd_root / "deps/emsdk/node").glob("*/*/bin/node"))
+    env_node = os.environ.get("EMSDK_NODE", "").strip()
+    if env_node and os.path.isfile(env_node):
+        return env_node
+    emsdk_nodes = sorted((obsd_root / "deps/emsdk/node").rglob("bin/node"))
     if emsdk_nodes:
         return str(emsdk_nodes[-1])
     w = shutil.which("node")
@@ -285,7 +290,7 @@ def merge_guest_objects(
         if not raw.strip():
             continue
         gpath, bname, sym, _entry_fn = raw.split("\t")
-        if base_mode == "minimal" and sym not in MINIMAL_BASE_SYMS:
+        if base_mode == "minimal" and bname not in MINIMAL_BASE_SYMS and sym not in MINIMAL_BASE_SYMS:
             continue
         loc_o = base_part_dir / f"{sym}.o"
         meta_p = base_part_dir / f"{sym}.meta.json"
@@ -640,6 +645,7 @@ def build_and_cache_test_runtime(
             "-m64",
             "-pthread",
             "-O2",
+            "--profiling-funcs",
             "-Wno-pthreads-mem-growth",
             "-sMODULARIZE=1",
             "-sEXPORT_ES6=1",
@@ -901,7 +907,7 @@ if (cfg.enableSvnp) {
         return finishSlot(slotIdx, reqId, sockId, 0, encodeAddr('127.0.0.1', 0, 4));
       }
       s.connecting = true;
-      const sock = net.createConnection({ host: dst.ip, port: dst.port });
+      const sock = net.createConnection({ host: dst.ip, port: dst.port, allowHalfOpen: true });
       s.tcp = sock;
       sock.on('data', (chunk) => {
         s.rxQueue.push({ data: Buffer.from(chunk), addr: null });
@@ -937,9 +943,14 @@ if (cfg.enableSvnp) {
         });
         return;
       }
-      if (!s.tcp || !s.connected) return finishSlot(slotIdx, reqId, sockId, 57);
+      if (!s.tcp) return finishSlot(slotIdx, reqId, sockId, 57);
+      if (s.connecting && !s.connected) return finishSlot(slotIdx, reqId, sockId, 35 /* EAGAIN */);
+      if (!s.connected || s.tcp.destroyed || !s.tcp.writable) {
+        const b = Buffer.alloc(4); b.writeUInt32LE(payload.length, 0);
+        return finishSlot(slotIdx, reqId, sockId, 0, b);
+      }
       s.tcp.write(payload, (err) => {
-        if (err) return finishSlot(slotIdx, reqId, sockId, 32);
+        if (err) return finishSlot(slotIdx, reqId, sockId, 54 /* ECONNRESET */);
         const b = Buffer.alloc(4); b.writeUInt32LE(payload.length, 0);
         finishSlot(slotIdx, reqId, sockId, 0, b);
       });

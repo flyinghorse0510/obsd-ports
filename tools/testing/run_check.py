@@ -23,7 +23,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 def find_node_dir(obsd_root: pathlib.Path) -> Optional[pathlib.Path]:
-    emsdk_nodes = sorted((obsd_root / "deps/emsdk/node").glob("*/*/bin/node"))
+    emsdk_nodes = sorted((obsd_root / "deps/emsdk/node").rglob("bin/node"))
     if emsdk_nodes:
         return emsdk_nodes[-1].parent
     w = shutil.which("node")
