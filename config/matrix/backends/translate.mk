@@ -1,0 +1,3 @@
+COMPAT_BACKEND_NAME := translate
+COMPAT_LINK_MODEL := standalone-exec
+COMPAT_PRODUCES_APPLETS := 0

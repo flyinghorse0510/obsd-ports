@@ -1,0 +1,11 @@
+COMPAT_PAL_NAME := emscripten
+COMPAT_GUEST_ARCH := wasm64
+COMPAT_AUTOCONF_HOST := aarch64-unknown-$(OPENBSD_TRIPLE_OS)
+COMPAT_SDK_CC := $(SDK_ROOT)/bin/obsd-cc
+COMPAT_SDK_CXX := $(SDK_ROOT)/bin/obsd-c++
+COMPAT_SDK_AR := $(SDK_ROOT)/bin/obsd-ar
+COMPAT_SDK_RANLIB := $(SDK_ROOT)/bin/obsd-ranlib
+COMPAT_SDK_LD := $(SDK_ROOT)/bin/obsd-ld
+COMPAT_SDK_NM := $(SDK_ROOT)/bin/obsd-nm
+COMPAT_SDK_STRIP := $(SDK_ROOT)/bin/obsd-strip
+COMPAT_SDK_PKG_CONFIG := $(SDK_ROOT)/bin/obsd-pkg-config
