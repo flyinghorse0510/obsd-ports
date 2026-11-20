@@ -1243,7 +1243,7 @@ def build_suite_runtime(ver: str, obsd_root: pathlib.Path, lane_dir: pathlib.Pat
     for raw in base_rows:
         p = pathlib.Path(raw.split("\t")[3])
         st = p.stat()
-        sig_h.update(f"{p}:{st.st_size}:{st.st_mtime_ns}".encode())
+        sig_h.update(f"{p.name}:{st.st_size}:{st.st_mtime_ns}".encode())
     sig = sig_h.hexdigest()
 
     runtime_mjs = suite_dir / "ports-suite-runtime.mjs"

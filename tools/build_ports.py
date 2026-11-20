@@ -763,8 +763,10 @@ def build_single_port(
     fetched = fetch_port_distfiles(recipe, openbsd_version)
 
     # Compute deterministic recipe + vendor + distfile build signature
+    # (exclude absolute `port_dir` Path so `.stamps/*.json` remain portable across checkouts/submodules)
     sig_h = hashlib.sha256()
-    sig_h.update(json.dumps(recipe, default=str, sort_keys=True).encode("utf-8"))
+    sig_recipe = {k: v for k, v in recipe.items() if k != "port_dir"}
+    sig_h.update(json.dumps(sig_recipe, default=str, sort_keys=True).encode("utf-8"))
     for vf in sorted(vendor_port_dir.rglob("*")):
         if vf.is_file():
             sig_h.update(vf.relative_to(vendor_port_dir).as_posix().encode())

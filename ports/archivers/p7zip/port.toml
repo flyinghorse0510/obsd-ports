@@ -53,6 +53,7 @@ install_cmd = [
     "obsd-install -d -m 0755 \"$STAGE_DIR/usr/local/bin\" \"$STAGE_DIR/usr/local/man/man1\"",
     "obsd-install -c -m 0755 \"$WRKSRC\"/CPP/7zip/Bundles/Alone/b/*/7za \"$WRKSRC\"/CPP/7zip/Bundles/Alone7z/b/*/7zr \"$STAGE_DIR/usr/local/bin/\"",
     "ln -sf 7za \"$STAGE_DIR/usr/local/bin/7z\"",
+    "rm -f \"$STAGE_DIR/usr/local/man/man1/7z.1\"",
     "sed 's,\\${TRUEPREFIX},/usr/local,g' \"$VENDOR_PORT_DIR/files/7z.1\" > \"$STAGE_DIR/usr/local/man/man1/7z.1\"",
     "chmod 0444 \"$STAGE_DIR/usr/local/man/man1/7z.1\"",
     "ln -sf 7z.1 \"$STAGE_DIR/usr/local/man/man1/7za.1\"",

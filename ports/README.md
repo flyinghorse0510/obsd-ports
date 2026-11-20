@@ -1,6 +1,6 @@
 # Port Recipes (`ports/`)
 
-Declarative cross-compilation recipes (`port.toml`) for OpenBSD `7.8` and `7.9` packages built against unmodified upstream metadata in `vendor/openbsd/versions/<version>/ports/`.
+Declarative cross-compilation recipes (`port.toml`) for OpenBSD `7.8`, `7.9`, and `8.0` packages built against unmodified upstream metadata in `vendor/openbsd/versions/<version>/ports/`.
 
 ## Wave-1 Ports
 
