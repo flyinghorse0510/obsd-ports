@@ -180,6 +180,7 @@ def main() -> int:
             "tests/wave2_search_gnu.py",
             "tests/wave2_net_arch.py",
             "tests/wave2_sys_tui.py",
+            "tests/wave3_sysmon.py",
         ]
         for rel_suite in wave2_suites:
             sp_path = REPO_ROOT / rel_suite

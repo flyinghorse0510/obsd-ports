@@ -1,0 +1,42 @@
+--- include/posixjmp.h.orig
++++ include/posixjmp.h
+@@ -25,6 +25,18 @@
+ 
+ /* This *must* be included *after* config.h */
+ 
++#if defined (LIBOBSDCOMPAT_OBJECT_FORMAT_WASM) && defined (__GNUC__) && defined (HAVE_POSIX_SIGSETJMP)
++#  define _BASH_WASM_SIGSETJMP(x, s) \
++	__extension__ ({ \
++		sigjmp_buf _bash_sj_tmp; \
++		int _bash_sj_rv = (sigsetjmp)(_bash_sj_tmp, (s)); \
++		if (_bash_sj_rv == 0) \
++			__builtin_memcpy((x), _bash_sj_tmp, sizeof (sigjmp_buf)); \
++		_bash_sj_rv; \
++	})
++#  define sigsetjmp(x, s)	_BASH_WASM_SIGSETJMP((x), (s))
++#endif
++
+ #if defined (HAVE_POSIX_SIGSETJMP)
+ #  define procenv_t	sigjmp_buf
+ 
+--- lib/readline/posixjmp.h.orig
++++ lib/readline/posixjmp.h
+@@ -25,6 +25,18 @@
+ 
+ /* This *must* be included *after* config.h */
+ 
++#if defined (LIBOBSDCOMPAT_OBJECT_FORMAT_WASM) && defined (__GNUC__) && defined (HAVE_POSIX_SIGSETJMP)
++#  define _BASH_WASM_SIGSETJMP(x, s) \
++	__extension__ ({ \
++		sigjmp_buf _bash_sj_tmp; \
++		int _bash_sj_rv = (sigsetjmp)(_bash_sj_tmp, (s)); \
++		if (_bash_sj_rv == 0) \
++			__builtin_memcpy((x), _bash_sj_tmp, sizeof (sigjmp_buf)); \
++		_bash_sj_rv; \
++	})
++#  define sigsetjmp(x, s)	_BASH_WASM_SIGSETJMP((x), (s))
++#endif
++
+ #if defined (HAVE_POSIX_SIGSETJMP)
+ #  define procenv_t	sigjmp_buf
+ 

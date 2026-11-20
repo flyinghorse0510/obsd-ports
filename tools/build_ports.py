@@ -26,6 +26,8 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import bz2
+import gzip
 import hashlib
 import json
 import lzma
@@ -148,7 +150,39 @@ def parse_openbsd_makefile_vars(paths: Sequence[pathlib.Path]) -> Dict[str, str]
         if cur:
             logical.append(cur)
 
-        for ln in logical:
+        def _unroll_for_loops(lines: Sequence[str], cur_env: Dict[str, str]) -> List[str]:
+            out_lines: List[str] = []
+            idx = 0
+            while idx < len(lines):
+                ln = lines[idx]
+                m_for = re.match(r"^\.for\s+([A-Za-z0-9_]+)\s+in\s+(.*)$", ln)
+                if not m_for:
+                    out_lines.append(ln)
+                    idx += 1
+                    continue
+                loop_var = m_for.group(1)
+                items = expand_openbsd_expr(m_for.group(2), cur_env).split()
+                depth = 1
+                end_idx = idx + 1
+                while end_idx < len(lines) and depth > 0:
+                    if re.match(r"^\.for\b", lines[end_idx]):
+                        depth += 1
+                    elif re.match(r"^\.endfor\b", lines[end_idx]):
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    end_idx += 1
+                body = lines[idx + 1 : end_idx]
+                var_pat = re.compile(
+                    rf"\$\{{{re.escape(loop_var)}\}}|\$\({re.escape(loop_var)}\)|\$(?={re.escape(loop_var)}(?![A-Za-z0-9_])){re.escape(loop_var)}"
+                )
+                for item in items:
+                    sub_body = [var_pat.sub(lambda _m, v=item: v, b) for b in body]
+                    out_lines.extend(_unroll_for_loops(sub_body, cur_env))
+                idx = end_idx + 1
+            return out_lines
+
+        for ln in _unroll_for_loops(logical, env):
             if ln.startswith("."):
                 continue
             m = VAR_ASSIGN_RE.match(ln)
@@ -225,10 +259,31 @@ def resolve_distfile_urls(
 
     env = parse_openbsd_makefile_vars(mk_paths)
     sites_raw = list(extra_sites)
+    leaf = distfile_name.rsplit("/", 1)[-1]
 
-    if "SITES" in env:
-        expanded = expand_openbsd_expr(env["SITES"], env)
-        sites_raw.extend(expanded.split())
+    matched_subkeys: Set[str] = set()
+    for df_key, df_val in env.items():
+        subkey = ""
+        if df_key.startswith("DISTFILES."):
+            subkey = df_key[len("DISTFILES.") :]
+        elif df_key.startswith("PATCHFILES."):
+            subkey = df_key[len("PATCHFILES.") :]
+        if not subkey:
+            continue
+        for tok in expand_openbsd_expr(df_val, env).split():
+            tok_clean = re.sub(r"\{[^}]*\}", "", re.sub(r":[0-9]$", "", tok))
+            if tok_clean == leaf or tok_clean == distfile_name:
+                matched_subkeys.add(subkey)
+
+    for subkey in sorted(matched_subkeys):
+        sub_sites = env.get(f"SITES.{subkey}", "")
+        if sub_sites:
+            sites_raw.extend(expand_openbsd_expr(sub_sites, env).split())
+
+    for mk_key, mk_val in env.items():
+        if mk_key == "SITES" or mk_key.startswith("SITES."):
+            expanded = expand_openbsd_expr(mk_val, env)
+            sites_raw.extend(expanded.split())
 
     gh_acct = expand_openbsd_expr(env.get("GH_ACCOUNT", ""), env).strip()
     gh_proj = expand_openbsd_expr(env.get("GH_PROJECT", ""), env).strip()
@@ -259,7 +314,18 @@ def resolve_distfile_urls(
         ]
     )
 
-    leaf = distfile_name.rsplit("/", 1)[-1]
+    remote_leaves: List[str] = [leaf]
+    for df_key, df_val in env.items():
+        if df_key == "DISTFILES" or df_key.startswith("DISTFILES.") or df_key == "PATCHFILES" or df_key.startswith("PATCHFILES."):
+            for tok in expand_openbsd_expr(df_val, env).split():
+                tok_clean = re.sub(r":[0-9]$", "", tok)
+                m_brace = re.match(r"^([^{}\s]+)\{([^}]+)\}(.*)$", tok_clean)
+                if m_brace:
+                    local_nm = m_brace.group(1) + m_brace.group(3)
+                    remote_nm = m_brace.group(2) + m_brace.group(3)
+                    if local_nm == leaf and remote_nm not in remote_leaves:
+                        remote_leaves.append(remote_nm)
+
     urls: List[str] = []
     seen: Set[str] = set()
     for s in sites_raw:
@@ -268,7 +334,11 @@ def resolve_distfile_urls(
             continue
         if not s.endswith("/"):
             s += "/"
-        for candidate in ([s + distfile_name, s + leaf] if "/" in distfile_name else [s + leaf]):
+        if "/OpenBSD/distfiles/" in s and "/" in distfile_name:
+            cands = [s + distfile_name, *[s + rl for rl in remote_leaves]]
+        else:
+            cands = [*[s + rl for rl in remote_leaves], *([s + distfile_name] if "/" in distfile_name else [])]
+        for candidate in cands:
             if candidate not in seen:
                 seen.add(candidate)
                 urls.append(candidate)
@@ -568,6 +638,75 @@ def detect_wrksrc(extract_root: pathlib.Path, wrksrc_subdir: str) -> pathlib.Pat
     return extract_root
 
 
+def parse_vendor_patchfiles(vendor_env: Dict[str, str], recipe: Dict[str, Any]) -> Tuple[Dict[str, int], int]:
+    """Return ({patch_filename_or_basename: strip_level}, default_dist_strip) for OpenBSD PATCHFILES."""
+    raw_strip = expand_openbsd_expr(vendor_env.get("PATCH_DIST_STRIP", "-p0"), vendor_env).strip()
+    m_st = re.search(r"-p(\d+)", raw_strip)
+    default_strip = int(recipe.get("patch_dist_strip", int(m_st.group(1)) if m_st else 0))
+
+    patch_map: Dict[str, int] = {}
+    dist_subdir = expand_openbsd_expr(vendor_env.get("DIST_SUBDIR", ""), vendor_env).strip().strip("/")
+
+    explicit_list = recipe.get("patchfiles")
+    tokens: List[str] = []
+    if explicit_list is not None:
+        tokens.extend(str(x) for x in explicit_list)
+    else:
+        for mk_key, mk_val in vendor_env.items():
+            if mk_key == "PATCHFILES" or mk_key.startswith("PATCHFILES."):
+                tokens.extend(expand_openbsd_expr(mk_val, vendor_env).split())
+
+    for tok in tokens:
+        p_strip = default_strip
+        m_col = re.match(r"^(.+):(\d)$", tok)
+        if m_col:
+            tok = m_col.group(1)
+            p_strip = int(m_col.group(2))
+        m_brace = re.match(r"^([^{}\s]+)\{([^}]+)\}(.*)$", tok)
+        if m_brace:
+            tok = m_brace.group(1) + m_brace.group(3)
+        patch_map[tok] = p_strip
+        if dist_subdir and "/" not in tok:
+            patch_map[f"{dist_subdir}/{tok}"] = p_strip
+    return patch_map, default_strip
+
+
+def read_patch_payload(patch_path: pathlib.Path) -> bytes:
+    low = patch_path.name.lower()
+    raw = patch_path.read_bytes()
+    if low.endswith(".gz"):
+        return gzip.decompress(raw)
+    if low.endswith(".bz2"):
+        return bz2.decompress(raw)
+    if low.endswith(".xz"):
+        return lzma.decompress(raw)
+    return raw
+
+
+def apply_patch_bytes(payload: bytes, wrksrc: pathlib.Path, strip_level: int, label: str) -> None:
+    print(f"  [patch] applying {label} (-p{strip_level})")
+    proc = subprocess.run(
+        [
+            "patch",
+            f"-p{strip_level}",
+            "-f",
+            "-N",
+            "-s",
+            "--no-backup-if-mismatch",
+            "-d",
+            str(wrksrc),
+        ],
+        input=payload,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if proc.returncode != 0:
+        die(
+            f"patch failed ({label}) in {wrksrc}:\n"
+            f"{proc.stdout.decode('utf-8', 'replace')}\n{proc.stderr.decode('utf-8', 'replace')}"
+        )
+
+
 def apply_patch_dir(patch_dir: pathlib.Path, wrksrc: pathlib.Path, strip_level: int, skip_set: Set[str], label: str) -> None:
     if not patch_dir.is_dir():
         return
@@ -795,9 +934,20 @@ def build_single_port(
     src_extract_dir = work_port_dir / "src"
     src_extract_dir.mkdir(parents=True, exist_ok=True)
 
+    mk_paths = [vendor_ports_dir / "/".join(vport.split("/")[:i]) / "Makefile.inc" for i in range(1, len(vport.split("/")))]
+    mk_paths.append(vendor_port_dir / "Makefile")
+    vendor_env = parse_openbsd_makefile_vars(mk_paths)
+    dist_patch_map, _default_dist_strip = parse_vendor_patchfiles(vendor_env, recipe)
+
     extract_only = set(recipe.get("extract_only", []))
-    for df_path, _ent in fetched:
-        if extract_only and df_path.name not in extract_only:
+    dist_patches_to_apply: List[Tuple[pathlib.Path, str, int]] = []
+    for df_path, ent in fetched:
+        fn = ent["filename"]
+        if fn in dist_patch_map or df_path.name in dist_patch_map:
+            st_lvl = dist_patch_map.get(fn, dist_patch_map.get(df_path.name, 0))
+            dist_patches_to_apply.append((df_path, fn, st_lvl))
+            continue
+        if extract_only and df_path.name not in extract_only and fn not in extract_only:
             continue
         extract_archive(df_path, src_extract_dir)
 
@@ -814,15 +964,18 @@ def build_single_port(
             crlf_path.write_bytes(crlf_path.read_bytes().replace(b"\r\n", b"\n"))
 
     skip_patches = set(recipe.get("skip_vendor_patches", []))
+    if recipe.get("apply_dist_patches", True):
+        for dp_path, dp_fn, dp_strip in dist_patches_to_apply:
+            if dp_fn in skip_patches or dp_path.name in skip_patches:
+                print(f"  [patch] skipping distpatch/{dp_fn} (per recipe)")
+                continue
+            apply_patch_bytes(read_patch_payload(dp_path), wrksrc, dp_strip, f"distpatch/{dp_fn}")
+
     pstrip = int(recipe.get("patch_strip", 0))
     if recipe.get("apply_vendor_patches", True):
         apply_patch_dir(vendor_port_dir / "patches", wrksrc, pstrip, skip_patches, f"vendor/{vport}/patches")
     local_pdir = recipe.get("local_patch_dir", "patches")
     apply_patch_dir(port_dir / local_pdir, wrksrc, pstrip, set(), f"ports/{port_name}/{local_pdir}")
-
-    mk_paths = [vendor_ports_dir / "/".join(vport.split("/")[:i]) / "Makefile.inc" for i in range(1, len(vport.split("/")))]
-    mk_paths.append(vendor_port_dir / "Makefile")
-    vendor_env = parse_openbsd_makefile_vars(mk_paths)
 
     env = make_sdk_env(
         openbsd_version=openbsd_version,

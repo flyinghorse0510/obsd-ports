@@ -151,6 +151,8 @@ IGNORED_WL_PREFIXES = (
     "--gc-sections",
     "--no-undefined",
     "--allow-shlib-undefined",
+    "--copy-dt-needed-entries",
+    "--no-copy-dt-needed-entries",
 )
 
 SOURCE_EXTS = {".c", ".cc", ".cpp", ".cxx", ".C", ".s", ".S", ".m"}

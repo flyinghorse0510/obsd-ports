@@ -19,7 +19,10 @@ build_style = "gnu"
 separate_build = false
 use_gmake = true
 
-# Vendor patch application in work/<port>/ (never mutates vendor/)
+# Vendor patch & distpatch application in work/<port>/ (never mutates vendor/)
+# OpenBSD PATCHFILES (e.g. bash53-001..) declared in vendor Makefile & distinfo
+# are fetched, SHA256-verified, and applied automatically before vendor patches/patch-*.
+apply_dist_patches = true
 apply_vendor_patches = true
 skip_vendor_patches = []
 patch_strip = 0

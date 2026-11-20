@@ -1,0 +1,49 @@
+port = "sysutils/htop"
+build_style = "gnu"
+use_gmake = true
+configure_default_args = false
+
+cppflags = [
+    "-D_XOPEN_SOURCE_EXTENDED",
+    "-DNCURSES_WIDECHAR=1",
+]
+
+libs = ["-lncursesw", "-lkvm", "-lm"]
+
+configure_args = [
+    "--prefix=/usr/local",
+    "--sysconfdir=/etc",
+    "--mandir=/usr/local/man",
+    "--enable-unicode",
+    "--disable-unwind",
+    "--disable-hwloc",
+    "--disable-pcp",
+    "--disable-sensors",
+]
+
+post_install = [
+    "rm -rf \"$STAGE_DIR/usr/local/share/icons\" \"$STAGE_DIR/usr/local/share/applications\" \"$STAGE_DIR/usr/local/share/pixmaps\"",
+]
+
+[[applets]]
+sym = "htop"
+binary = "/usr/local/bin/htop"
+paths = ["/usr/local/bin/htop"]
+
+[env]
+ac_cv_header_execinfo_h = "no"
+ac_cv_lib_execinfo_backtrace = "no"
+CURSES_LIBS = "-lncursesw"
+
+[versions."8.0"]
+configure_args = [
+    "--prefix=/usr/local",
+    "--sysconfdir=/etc",
+    "--mandir=/usr/local/man",
+    "--enable-unicode",
+    "--disable-backtrace",
+    "--without-libunwind",
+    "--disable-hwloc",
+    "--disable-pcp",
+    "--disable-sensors",
+]

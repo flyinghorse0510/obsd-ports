@@ -1,0 +1,11 @@
+--- src/btop_cli.cpp.orig
++++ src/btop_cli.cpp
+@@ -67,7 +67,7 @@
+ 				cli.debug = true;
+ 				continue;
+ 			}
+-			if (arg == "--force-utf") {
++			if (arg == "--force-utf" || arg == "--utf-force") {
+ 				cli.force_utf = true;
+ 				continue;
+ 			}

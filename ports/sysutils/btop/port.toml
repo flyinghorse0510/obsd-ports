@@ -1,0 +1,30 @@
+port = "sysutils/btop"
+build_style = "make"
+use_gmake = true
+
+pre_build = [
+    "python3 -I \"$PORT_DIR/gen_manpage.py\" \"$WRKSRC/manpage.md\" \"$WRKSRC/btop.1\"",
+]
+
+build_cmd = [
+    "gmake -j\"$JOBS\" PLATFORM=OpenBSD ARCH=aarch64 CXX=\"$CXX\" CC=\"$CC\" OPTFLAGS=\"-O2\" ADDFLAGS=\"\" LTO=\"\" THREADS=\"$JOBS\" VERBOSE=true QUIET=true BANNER=\"\"",
+]
+
+install_cmd = [
+    "gmake install DESTDIR=\"$STAGE_DIR\" PREFIX=/usr/local PLATFORM=OpenBSD ARCH=aarch64",
+]
+
+post_install = [
+    "rm -rf \"$STAGE_DIR/usr/local/share/icons\" \"$STAGE_DIR/usr/local/share/applications\"",
+]
+
+[[applets]]
+sym = "btop"
+binary = "/usr/local/bin/btop"
+paths = ["/usr/local/bin/btop"]
+
+[versions."7.8"]
+local_patch_dir = "patches-7.8"
+
+[versions."7.9"]
+pkgname = "btop-1.4.6p0"

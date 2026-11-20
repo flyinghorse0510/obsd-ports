@@ -1,0 +1,11 @@
+--- src/openbsd/btop_collect.cpp.orig
++++ src/openbsd/btop_collect.cpp
+@@ -520,7 +520,7 @@
+ 		int num_drives = 0;
+ 		int mib[2] = { CTL_HW, HW_DISKCOUNT };
+ 
+-		size_t size;
++		size_t size = sizeof(num_drives);
+ 		if (sysctl(mib, 2, &num_drives, &size, NULL, 0) >= 0) {
+ 			mib[0] = CTL_HW;
+ 			mib[1] = HW_DISKSTATS;

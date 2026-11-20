@@ -1,0 +1,51 @@
+port = "sysutils/fastfetch"
+depends = ["databases/sqlite3"]
+build_style = "cmake"
+separate_build = true
+
+pre_configure = [
+    "python3 -I \"$PORT_DIR/patch_cmake.py\" \"$WRKSRC\"",
+]
+
+cmake_args = [
+    "-DBINARY_LINK_TYPE=dynamic",
+    "-DBUILD_FLASHFETCH=OFF",
+    "-DBUILD_TESTS=OFF",
+    "-DSET_TWEAK=OFF",
+    "-DENABLE_LTO=OFF",
+    "-DENABLE_VULKAN=OFF",
+    "-DENABLE_WAYLAND=OFF",
+    "-DENABLE_XCB_RANDR=OFF",
+    "-DENABLE_XRANDR=OFF",
+    "-DENABLE_DRM=OFF",
+    "-DENABLE_DRM_AMDGPU=OFF",
+    "-DENABLE_GIO=OFF",
+    "-DENABLE_DCONF=OFF",
+    "-DENABLE_DBUS=OFF",
+    "-DENABLE_XFCONF=OFF",
+    "-DENABLE_IMAGEMAGICK7=OFF",
+    "-DENABLE_IMAGEMAGICK6=OFF",
+    "-DENABLE_CHAFA=OFF",
+    "-DENABLE_IMAGE_LOGO=OFF",
+    "-DENABLE_SIXEL=OFF",
+    "-DENABLE_EGL=OFF",
+    "-DENABLE_GLX=OFF",
+    "-DENABLE_OSMESA=OFF",
+    "-DENABLE_OPENCL=OFF",
+    "-DENABLE_FREETYPE=OFF",
+    "-DENABLE_PULSE=OFF",
+    "-DENABLE_DDCUTIL=OFF",
+    "-DENABLE_ELF=OFF",
+    "-DENABLE_LIBZFS=OFF",
+    "-DENABLE_PCIACCESS=OFF",
+    "-DENABLE_LUA=OFF",
+    "-DENABLE_QUICKJS=OFF",
+    "-DENABLE_SQLITE3=ON",
+    "-DENABLE_ZLIB=ON",
+    "-DENABLE_THREADS=ON",
+]
+
+[[applets]]
+sym = "fastfetch"
+binary = "/usr/local/bin/fastfetch"
+paths = ["/usr/local/bin/fastfetch"]

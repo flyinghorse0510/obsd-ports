@@ -1,0 +1,48 @@
+port = "shells/bash"
+depends = ["converters/libiconv"]
+build_style = "gnu"
+use_gmake = true
+configure_default_args = false
+
+cflags = ["-Wno-parentheses"]
+libs = ["-liconv"]
+
+configure_args = [
+    "--prefix=/usr/local",
+    "--sysconfdir=/etc",
+    "--mandir=/usr/local/man",
+    "--without-bash-malloc",
+    "--disable-nls",
+    "--with-curses",
+    "--with-libiconv-prefix=/usr/local",
+]
+
+make_args = ["LIBS_FOR_BUILD="]
+make_targets = ["all"]
+install_args = ["LIBS_FOR_BUILD="]
+
+post_install = [
+    "rm -rf \"$STAGE_DIR/usr/local/include/bash\" \"$STAGE_DIR/usr/local/lib/bash\" \"$STAGE_DIR/usr/local/lib/pkgconfig/bash.pc\" \"$STAGE_DIR/usr/local/share/doc/bash\" \"$STAGE_DIR/usr/local/info\"",
+]
+
+[env]
+LIBS_FOR_BUILD = ""
+bash_cv_dev_fd = "absent"
+bash_cv_dev_stdin = "absent"
+bash_cv_getcwd_malloc = "yes"
+bash_cv_func_sigsetjmp = "present"
+bash_cv_job_control_missing = "present"
+bash_cv_sys_named_pipes = "present"
+bash_cv_printf_a_format = "yes"
+bash_cv_wexitstatus_offset = "8"
+bash_cv_func_snprintf = "yes"
+bash_cv_func_vsnprintf = "yes"
+bash_cv_wcwidth_broken = "no"
+bash_cv_dup2_broken = "no"
+bash_cv_pgrp_pipe = "no"
+bash_cv_must_reinstall_sighandlers = "no"
+
+[[applets]]
+sym = "bash"
+binary = "/usr/local/bin/bash"
+paths = ["/usr/local/bin/bash"]

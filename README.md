@@ -24,9 +24,9 @@ All build outputs isolate cleanly under `build/openbsd/<OPENBSD_VERSION>/<COMPAT
 
 `make clean` works standalone with zero external dependencies.
 
-## Built & Verified Ports Catalog (48 Ports across OpenBSD 7.8, 7.9 & 8.0)
+## Built & Verified Ports Catalog (53 Ports across OpenBSD 7.8, 7.9 & 8.0)
 
-All **48 ports** compile with `sdk/bin/obsd-cc` and `sdk/bin/obsd-c++` (including native WASM64 C++17/23 `libc++.a` + `libc++abi.a` with `-fwasm-exceptions` and per-exec constructor initialization) into **71 localized WASM64 applet closures** (**211** command paths on OpenBSD `7.8`, **207** command paths on OpenBSD `7.9` and `8.0`) plus static `.a` developer libraries, headers, `pkg-config` `.pc` metadata, configs, and manual pages:
+All **53 ports** compile with `sdk/bin/obsd-cc` and `sdk/bin/obsd-c++` (including native WASM64 C++17/23 `libc++.a` + `libc++abi.a` with `-fwasm-exceptions` and per-exec constructor initialization) into **75 localized WASM64 applet closures** (**215** command paths on OpenBSD `7.8`, **211** command paths on OpenBSD `7.9` and `8.0`) plus static `.a` developer libraries, headers, `pkg-config` `.pc` metadata, configs, and manual pages:
 
 | Category & Port | OpenBSD 7.8 | OpenBSD 7.9 | OpenBSD 8.0 | Exported Applets, Wrappers & Static Libraries |
 | :--- | :--- | :--- | :--- | :--- |
@@ -43,9 +43,14 @@ All **48 ports** compile with `sdk/bin/obsd-cc` and `sdk/bin/obsd-c++` (includin
 | `lang/jimtcl` | `0.80` | `0.81` | `0.81` | `jimsh`, `libjim.a` (with static SQLite3 + zlib extensions) |
 | `lang/gawk` | `5.1.0` | `5.4.0` | `5.4.1` | `gawk` |
 | `databases/sqlite3` | `3.50.4` | `3.51.3` | `3.53.2` | `sqlite3`, `libsqlite3.a` (FTS5 + JSON) |
-| **Editors & Terminal UI** | | | | |
+| **Shells, Editors & System Monitors** | | | | |
+| `shells/bash` | `5.3.3` | `5.3.9` | `5.3.20` | `bash`, `bashbug` (GNU Bourne Again Shell with Readline + iconv) |
 | `editors/vim` | `9.1.1706` | `9.2.0357` | `9.2.1125` | `vim`, `vimdiff`, `rvim`, `rview`, `xxd`, trimmed `share/vim` runtime |
 | `editors/nano` | `8.6` | `8.7.1` | `9.2` | `nano`, `rnano`, syntax highlighting rules |
+| `sysutils/htop` | `3.4.1` | `3.4.1` | `3.5.3` | `htop` widechar Unicode curses interactive process viewer |
+| `sysutils/btop` | `1.4.5` | `1.4.6p0` | `1.4.7` | `btop` C++23 UTF-8/Braille resource monitor + 41 color themes |
+| `sysutils/fastfetch` | `2.53.0` | `2.60.0` | `2.69.0` | `fastfetch` C system information tool + presets & completions |
+| `sysutils/neofetch` | `7.1.0p0` | `7.1.0p0` | `7.1.0p0` | `neofetch` Bash system information tool |
 | `sysutils/ncdu` | `1.22` | `1.22` | `1.22` | `ncdu` curses disk usage analyzer |
 | **Search, Text, XML & Markdown** | | | | |
 | `sysutils/ugrep` | `7.4.2` | `7.6.0` | `7.8.3` | `ugrep`, `ug`, `ugrep-indexer`, `ug+`/`ugrep+` (WASM64 C++ + PCRE2 + `-z` archive search) |
@@ -114,7 +119,7 @@ make package OPENBSD_VERSION=8.0
 make package OPENBSD_VERSION=7.9
 make package OPENBSD_VERSION=7.8
 
-# Run SDK + full 48-port WASM64 verification suites (Wave-1 + Foundation + Wave-2 Slices A-D)
+# Run SDK + full 53-port WASM64 verification suites (Wave-1 + Foundation + Wave-2 Slices A-D + Wave-3 Sysmon)
 make check OPENBSD_VERSION=8.0
 make check OPENBSD_VERSION=7.9
 make check OPENBSD_VERSION=7.8

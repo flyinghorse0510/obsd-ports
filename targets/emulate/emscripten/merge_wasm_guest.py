@@ -68,6 +68,17 @@ MINIMAL_BASE_SYMS = {
     "chroot",
     "ftp",
     "nc",
+    "sysctl",
+    "awk",
+    "ps",
+    "df",
+    "cut",
+    "date",
+    "hostname",
+    "expr",
+    "stty",
+    "tty",
+    "tput",
 }
 
 HOST_RUNNER_C = r'''
@@ -589,6 +600,7 @@ def build_and_cache_test_runtime(
 
     h = hashlib.sha256()
     h.update(f"{base_ar.stat().st_mtime_ns}:{host_ar.stat().st_mtime_ns}".encode())
+    h.update(",".join(sorted(MINIMAL_BASE_SYMS)).encode())
     h.update(HOST_RUNNER_C.encode())
     for sym, gp, ent, obj_p in port_rows:
         st = obj_p.stat()
@@ -1146,6 +1158,16 @@ def cmd_run_guest(args: argparse.Namespace) -> int:
             if cand.is_file():
                 staged_files.append((f"/usr/share/terminfo/{rel_ti}", str(cand), 0o444))
                 break
+
+    # Stage OpenBSD UTF-8 LC_CTYPE when available so widechar curses TUIs enable UTF-8 cleanly
+    for lc_cand in (
+        obsd_root.parent.parent / f"build/wasm/.work-{ver}/rootfs/LC_CTYPE",
+        obsd_root.parent.parent / "runtime/overlay/usr/share/locale/UTF-8/LC_CTYPE",
+        obsd_root / "vendor/openbsd/versions" / ver / "share/locale/UTF-8/LC_CTYPE",
+    ):
+        if lc_cand.is_file():
+            staged_files.append(("/usr/share/locale/UTF-8/LC_CTYPE", str(lc_cand), 0o444))
+            break
 
     script_body = args.script_file and pathlib.Path(args.script_file).read_text(encoding="utf-8") or args.cmd
     full_script = (

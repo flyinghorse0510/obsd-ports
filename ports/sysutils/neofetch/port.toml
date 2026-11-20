@@ -1,0 +1,11 @@
+port = "sysutils/neofetch"
+pkgname = "neofetch-7.1.0p0"
+depends = ["shells/bash"]
+build_style = "script"
+
+build_cmd = [
+    "sed '1s|^#!.*|#!/usr/local/bin/bash|' \"$WRKSRC/neofetch\" > \"$WRKSRC/neofetch.obsd\"",
+    "obsd-install -d -m 0755 \"$STAGE_DIR/usr/local/bin\" \"$STAGE_DIR/usr/local/man/man1\"",
+    "obsd-install -c -m 0755 \"$WRKSRC/neofetch.obsd\" \"$STAGE_DIR/usr/local/bin/neofetch\"",
+    "obsd-install -c -m 0444 \"$WRKSRC/neofetch.1\" \"$STAGE_DIR/usr/local/man/man1/neofetch.1\"",
+]
