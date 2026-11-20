@@ -2,7 +2,7 @@
 
 Each ported package lives at `ports/<portpath>/port.toml` (supporting both 2-level paths like `ports/archivers/bzip2/port.toml` and 3-level paths like `ports/lang/lua/5.4/port.toml`).
 
-A single `port.toml` builds against **both** OpenBSD `7.8` and OpenBSD `7.9` automatically: `tools/build_ports.py` reads the release-specific `distinfo`, `Makefile`, and `patches/patch-*` from `vendor/openbsd/versions/$(OPENBSD_VERSION)/ports/<vendor_port>/`.
+A single `port.toml` builds against OpenBSD `7.8`, `7.9`, and `8.0` automatically: `tools/build_ports.py` reads the release-specific `distinfo`, `Makefile`, and `patches/patch-*` from `vendor/openbsd/versions/$(OPENBSD_VERSION)/ports/<vendor_port>/`.
 
 ## Schema Reference
 

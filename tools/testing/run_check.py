@@ -93,7 +93,7 @@ def verify_sdk_smoke(openbsd_version: str, obsd_root: pathlib.Path) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--openbsd-version", default="7.9")
+    ap.add_argument("--openbsd-version", default="8.0")
     ap.add_argument("--backend", default="emulate")
     ap.add_argument("--pal", default="emscripten")
     ap.add_argument("--libobsdcompat-root", required=True)

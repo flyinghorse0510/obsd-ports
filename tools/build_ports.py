@@ -793,7 +793,10 @@ def build_single_port(
     src_extract_dir = work_port_dir / "src"
     src_extract_dir.mkdir(parents=True, exist_ok=True)
 
+    extract_only = set(recipe.get("extract_only", []))
     for df_path, _ent in fetched:
+        if extract_only and df_path.name not in extract_only:
+            continue
         extract_archive(df_path, src_extract_dir)
 
     wrksrc = detect_wrksrc(src_extract_dir, recipe.get("wrksrc_subdir", ""))
@@ -803,11 +806,17 @@ def build_single_port(
     else:
         wrkbuild = wrksrc
 
+    for crlf_rel in recipe.get("fix_crlf_files", []):
+        crlf_path = wrksrc / crlf_rel
+        if crlf_path.is_file():
+            crlf_path.write_bytes(crlf_path.read_bytes().replace(b"\r\n", b"\n"))
+
     skip_patches = set(recipe.get("skip_vendor_patches", []))
     pstrip = int(recipe.get("patch_strip", 0))
     if recipe.get("apply_vendor_patches", True):
         apply_patch_dir(vendor_port_dir / "patches", wrksrc, pstrip, skip_patches, f"vendor/{vport}/patches")
-    apply_patch_dir(port_dir / "patches", wrksrc, pstrip, set(), f"ports/{port_name}/patches")
+    local_pdir = recipe.get("local_patch_dir", "patches")
+    apply_patch_dir(port_dir / local_pdir, wrksrc, pstrip, set(), f"ports/{port_name}/{local_pdir}")
 
     mk_paths = [vendor_ports_dir / "/".join(vport.split("/")[:i]) / "Makefile.inc" for i in range(1, len(vport.split("/")))]
     mk_paths.append(vendor_port_dir / "Makefile")
@@ -1089,12 +1098,12 @@ def main() -> int:
     sub = ap.add_subparsers(dest="subcmd", required=True)
 
     p_cat = sub.add_parser("list-catalog")
-    p_cat.add_argument("--openbsd-version", default="7.9")
+    p_cat.add_argument("--openbsd-version", default="8.0")
     p_cat.add_argument("--filter", default="")
 
     for name in ("list", "fetch", "build", "package"):
         sp = sub.add_parser(name)
-        sp.add_argument("--openbsd-version", default="7.9")
+        sp.add_argument("--openbsd-version", default="8.0")
         sp.add_argument("--backend", default="emulate")
         sp.add_argument("--pal", default="emscripten")
         sp.add_argument("--libobsdcompat-root", default="")

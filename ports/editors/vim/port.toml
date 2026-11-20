@@ -74,6 +74,10 @@ wrksrc_subdir = "vim-9.1.1706"
 pkgname = "vim-9.2.0357"
 wrksrc_subdir = "vim-9.2.0357"
 
+[versions."8.0"]
+pkgname = "vim-9.2.1125"
+wrksrc_subdir = "vim-9.2.1125"
+
 [[applets]]
 sym = "vim"
 binary = "/usr/local/bin/vim"

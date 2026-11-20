@@ -69,6 +69,61 @@ wrksrc_subdir = "git-2.51.0"
 [versions."7.9"]
 wrksrc_subdir = "git-2.53.0"
 
+[versions."8.0"]
+wrksrc_subdir = "git-2.55.0"
+make_args = [
+    "CC=obsd-cc",
+    "AR=obsd-ar",
+    "RANLIB=obsd-ranlib",
+    "STRIP=obsd-strip",
+    "LD=obsd-ld",
+    "prefix=/usr/local",
+    "sysconfdir=/usr/local/etc",
+    "mandir=/usr/local/man",
+    "gitexecdir=/usr/local/libexec/git",
+    "uname_S=OpenBSD",
+    "uname_M=wasm64",
+    "NO_PERL=YesPlease",
+    "NO_PYTHON=YesPlease",
+    "NO_TCLTK=YesPlease",
+    "NO_GETTEXT=YesPlease",
+    "NO_RUST=1",
+    "USE_LIBPCRE2=YesPlease",
+    "LIBPCREDIR=/usr/local",
+    "ICONVDIR=/usr/local",
+    "CURLDIR=/usr/local",
+    "CURL_LDFLAGS=-lcurl -lzstd -lssl -lcrypto -lz",
+    "OPENSSLDIR=/usr",
+    "EXPATDIR=/usr",
+    "ZLIB_PATH=/usr",
+]
+install_args = [
+    "CC=obsd-cc",
+    "AR=obsd-ar",
+    "RANLIB=obsd-ranlib",
+    "STRIP=obsd-strip",
+    "LD=obsd-ld",
+    "prefix=/usr/local",
+    "sysconfdir=/usr/local/etc",
+    "mandir=/usr/local/man",
+    "gitexecdir=/usr/local/libexec/git",
+    "uname_S=OpenBSD",
+    "uname_M=wasm64",
+    "NO_PERL=YesPlease",
+    "NO_PYTHON=YesPlease",
+    "NO_TCLTK=YesPlease",
+    "NO_GETTEXT=YesPlease",
+    "NO_RUST=1",
+    "USE_LIBPCRE2=YesPlease",
+    "LIBPCREDIR=/usr/local",
+    "ICONVDIR=/usr/local",
+    "CURLDIR=/usr/local",
+    "CURL_LDFLAGS=-lcurl -lzstd -lssl -lcrypto -lz",
+    "OPENSSLDIR=/usr",
+    "EXPATDIR=/usr",
+    "ZLIB_PATH=/usr",
+]
+
 [[applets]]
 sym = "git"
 binary = "/usr/local/bin/git"

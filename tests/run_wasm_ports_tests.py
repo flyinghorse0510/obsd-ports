@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/run_wasm_ports_tests.py -- Comprehensive Dual-Release (OpenBSD 7.8 + 7.9)
+tests/run_wasm_ports_tests.py -- Comprehensive Tri-Release (OpenBSD 7.8 + 7.9 + 8.0)
 WASM64 Port Verification Suite for `obsd-ports`.
 
-Wired into `make check OPENBSD_VERSION=7.8|7.9` (and runnable standalone for
-both releases via `--openbsd-version all`).
+Wired into `make check OPENBSD_VERSION=7.8|7.9|8.0` (and runnable standalone for
+all releases via `--openbsd-version all`).
 
 Verifies:
   1. Packaging & ABI Artifacts (`stage/`, `applets/*.o`, `ports-applets.tsv`,
@@ -1453,7 +1453,7 @@ def main() -> int:
     ap.add_argument(
         "--openbsd-version",
         default=os.environ.get("OPENBSD_VERSION", "all"),
-        help="Target OpenBSD version (7.8, 7.9, or all)",
+        help="Target OpenBSD version (7.8, 7.9, 8.0, or all)",
     )
     ap.add_argument("--libobsdcompat-root", default="")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 8)
@@ -1462,7 +1462,7 @@ def main() -> int:
 
     obsd_root = resolve_obsd_root(args.libobsdcompat_root)
     target = args.openbsd_version.strip()
-    versions = ["7.8", "7.9"] if target in ("", "all") else [v.strip() for v in target.split(",") if v.strip()]
+    versions = ["7.8", "7.9", "8.0"] if target in ("", "all") else [v.strip() for v in target.split(",") if v.strip()]
 
     for ver in versions:
         run_single_release_check(ver, obsd_root, args.jobs)

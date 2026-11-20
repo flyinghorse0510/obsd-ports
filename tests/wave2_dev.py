@@ -54,6 +54,14 @@ EXPECTED_VERSIONS: Dict[str, Dict[str, str]] = {
         "quickjs": "2024-01-13",
         "jimtcl": "0.81",
     },
+    "8.0": {
+        "git": "2.55.0",
+        "gmake": "4.4.1",
+        "tig": "2.6.1",
+        "uctags": "6.2.1",
+        "quickjs": "2024-01-13",
+        "jimtcl": "0.81",
+    },
 }
 
 REQUIRED_APPLETS: Dict[str, List[str]] = {
@@ -320,6 +328,8 @@ set -e
 
 EXPECTED_REL="__OPENBSD_VERSION__"
 EXPECTED_GIT_VER="__GIT_VERSION__"
+EXPECTED_TIG_VER="__TIG_VERSION__"
+EXPECTED_UCTAGS_VER="__UCTAGS_VERSION__"
 EXPECTED_JIM_VER="__JIM_VERSION__"
 
 fail() {
@@ -500,8 +510,8 @@ pass "03_gmake_parallel" "$GMAKE_V -j2 multi-rule pipe-jobserver DAG build + MAL
 # ==============================================================================
 TIG_V=$(MALLOC_OPTIONS=JJ tig --version | head -n 1)
 case "$TIG_V" in
-	*"tig version 2.6.0"*) ;;
-	*) fail "unexpected tig --version: $TIG_V" ;;
+	*"tig version $EXPECTED_TIG_VER"*) ;;
+	*) fail "unexpected tig --version (expected $EXPECTED_TIG_VER): $TIG_V" ;;
 esac
 
 TIG_PTY_OUT=$(MALLOC_OPTIONS=JJ /usr/local/libexec/w2_dev_probe tig-pty /tmp/w2_git_repo)
@@ -516,8 +526,8 @@ pass "04_tig_curses_pty" "$TIG_V + 80x24 openpty/login_tty curses git browser ($
 # ==============================================================================
 UCTAGS_V=$(uctags --version | head -n 1)
 case "$UCTAGS_V" in
-	*"Universal Ctags 6.1.0"*) ;;
-	*) fail "unexpected uctags --version: $UCTAGS_V" ;;
+	*"Universal Ctags $EXPECTED_UCTAGS_VER"*) ;;
+	*) fail "unexpected uctags --version (expected $EXPECTED_UCTAGS_VER): $UCTAGS_V" ;;
 esac
 
 rm -f /tmp/w2_tags
@@ -792,6 +802,8 @@ def run_version_suite(ver: str, obsd_root: pathlib.Path) -> None:
     script_text = (
         GUEST_TEST_SH.replace("__OPENBSD_VERSION__", ver)
         .replace("__GIT_VERSION__", exp["git"])
+        .replace("__TIG_VERSION__", exp["tig"])
+        .replace("__UCTAGS_VERSION__", exp["uctags"])
         .replace("__JIM_VERSION__", exp["jimtcl"])
     )
 
@@ -831,12 +843,12 @@ def run_version_suite(ver: str, obsd_root: pathlib.Path) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--openbsd-version", choices=("7.8", "7.9", "all"), default="all")
+    ap.add_argument("--openbsd-version", choices=("7.8", "7.9", "8.0", "all"), default="all")
     ap.add_argument("--libobsdcompat-root", default="")
     args = ap.parse_args()
 
     obsd_root = resolve_obsd_root(args.libobsdcompat_root)
-    versions = ["7.8", "7.9"] if args.openbsd_version == "all" else [args.openbsd_version]
+    versions = ["7.8", "7.9", "8.0"] if args.openbsd_version == "all" else [args.openbsd_version]
     for ver in versions:
         print(f"=== Running Wave-2 Slice A (ports-dev) verification on OpenBSD {ver} ===")
         run_version_suite(ver, obsd_root)

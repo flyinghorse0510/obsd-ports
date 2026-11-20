@@ -33,6 +33,12 @@ sites = [
     "https://download.gnome.org/sources/libxml2/2.15/",
 ]
 
+[versions."8.0"]
+pkgname = "libxml-2.15.4"
+sites = [
+    "https://download.gnome.org/sources/libxml2/2.15/",
+]
+
 [[applets]]
 sym = "xmllint"
 binary = "/usr/local/bin/xmllint"

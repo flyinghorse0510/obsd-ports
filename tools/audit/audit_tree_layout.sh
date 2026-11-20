@@ -19,6 +19,7 @@ required_dirs=(
 	sdk/cmake
 	vendor/openbsd/versions/7.8/ports
 	vendor/openbsd/versions/7.9/ports
+	vendor/openbsd/versions/8.0/ports
 	targets/emulate/emscripten
 	targets/emulate/darwin
 	targets/emulate/wasi
@@ -45,8 +46,10 @@ required_files=(
 	config/versions/index.tsv
 	config/versions/7.8.mk
 	config/versions/7.9.mk
+	config/versions/8.0.mk
 	config/versions/7.8-catalog.tsv
 	config/versions/7.9-catalog.tsv
+	config/versions/8.0-catalog.tsv
 	config/matrix/index.tsv
 	sdk/bin/obsd-cc
 	sdk/bin/obsd-c++

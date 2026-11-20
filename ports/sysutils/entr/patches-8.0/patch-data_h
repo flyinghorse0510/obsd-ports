@@ -1,0 +1,11 @@
+--- data.h.orig
++++ data.h
+@@ -28,6 +28,8 @@
+ 	int file_count;
+ 	mode_t mode;
+ 	ino_t ino;
++	off_t size;
++	struct timespec mtime;
+ } WatchFile;
+ 
+ /* defined in entr.c */

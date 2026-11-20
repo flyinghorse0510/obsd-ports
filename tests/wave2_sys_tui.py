@@ -475,7 +475,7 @@ if [ -f /tmp/sys_tui/entr/postponed.out ]; then
 fi
 ATT=0
 while [ "$ATT" -lt 25 ]; do
-  printf 'modified-%d\n' "$ATT" > /tmp/sys_tui/entr/watch.txt
+  printf 'modified-%d-%0*d\n' "$ATT" "$((ATT + 1))" 0 > /tmp/sys_tui/entr/watch.txt
   if [ -s /tmp/sys_tui/entr/postponed.out ]; then
     break
   fi
@@ -799,7 +799,7 @@ def main() -> int:
 
     obsd_root = resolve_obsd_root(args.libobsdcompat_root)
     target = args.openbsd_version.strip()
-    versions = ["7.8", "7.9"] if target in ("", "all") else [v.strip() for v in target.split(",") if v.strip()]
+    versions = ["7.8", "7.9", "8.0"] if target in ("", "all") else [v.strip() for v in target.split(",") if v.strip()]
 
     for ver in versions:
         run_version_suite(ver, obsd_root, args.ports_lane_dir)

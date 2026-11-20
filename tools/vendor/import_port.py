@@ -103,7 +103,7 @@ def import_ports_for_version(
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--version", default="all", help="OpenBSD release version (7.8, 7.9, or all)")
+    ap.add_argument("--version", default="all", help="OpenBSD release version (7.8, 7.9, 8.0, or all)")
     ap.add_argument("ports", nargs="+", help="Port path(s) <category>/<name> [...]")
     args = ap.parse_args()
 

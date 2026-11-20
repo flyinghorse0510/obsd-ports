@@ -14,3 +14,6 @@ install_cmd = [
 sym = "entr"
 binary = "/usr/local/bin/entr"
 paths = ["/usr/local/bin/entr"]
+
+[versions."8.0"]
+local_patch_dir = "patches-8.0"

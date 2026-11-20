@@ -6,7 +6,7 @@
 obsd-ports/
 ├── Makefile                        # Guarded parser boundary -> mk/root/main.mk
 ├── config/
-│   ├── versions/                   # OpenBSD release axis (index.tsv, 7.8.mk, 7.9.mk, *-catalog.tsv)
+│   ├── versions/                   # OpenBSD release axis (index.tsv, 7.8.mk, 7.9.mk, 8.0.mk, *-catalog.tsv)
 │   └── matrix/                     # Backend x PAL matrix (index.tsv, backends/*.mk, pals/*.mk)
 ├── mk/
 │   ├── root/                       # Standalone clean + strict layer ordering
@@ -20,7 +20,8 @@ obsd-ports/
 │   └── cmake/openbsd-wasm64.cmake  # CMake cross-compilation toolchain
 ├── vendor/openbsd/versions/
 │   ├── 7.8/ports/                  # Immutable OpenBSD 7.8 port Makefiles, distinfo, patches/*, pkg/*
-│   └── 7.9/ports/                  # Immutable OpenBSD 7.9 port Makefiles, distinfo, patches/*, pkg/*
+│   ├── 7.9/ports/                  # Immutable OpenBSD 7.9 port Makefiles, distinfo, patches/*, pkg/*
+│   └── 8.0/ports/                  # Immutable OpenBSD 8.0 port Makefiles, distinfo, patches/*, pkg/*
 ├── ports/                          # Declarative port build recipes (<category>/<name>/port.toml)
 ├── targets/
 │   ├── emulate/{emscripten,wasi,darwin}/
@@ -38,7 +39,7 @@ obsd-ports/
 
 Full OpenBSD `ports.tar.gz` archives contain ~220,000 tiny files per release (~440,000 files across `7.8` and `7.9`). To keep Git fast while retaining 100% upstream fidelity:
 
-1. `tools/vendor/sync_openbsd_ports.py` downloads and verifies the official release `ports.tar.gz` tarballs against pinned SHA256 digests in `config/versions/index.tsv`, caches them in `.cache/openbsd/<ver>/ports.tar.gz`, and indexes all ~10,500+ ports into `config/versions/{7.8,7.9}-catalog.tsv`.
+1. `tools/vendor/sync_openbsd_ports.py` downloads and verifies the official release `ports.tar.gz` tarballs against pinned SHA256 digests in `config/versions/index.tsv`, caches them in `.cache/openbsd/<ver>/ports.tar.gz`, and indexes all ~10,400–10,750+ ports into `config/versions/{7.8,7.9,8.0}-catalog.tsv`.
 2. `tools/vendor/import_port.py <cat>/<name>` extracts the exact, unmodified upstream `<cat>/<name>/{Makefile,distinfo,patches/*,pkg/*,files/*}` (plus any ancestor `Makefile.inc` / `*.port.mk`) for every active release into `vendor/openbsd/versions/<ver>/ports/` and records per-file SHA256 digests in `tools/audit/vendor-baseline.tsv`.
 3. Upstream `patches/patch-*` are applied inside `build/openbsd/<ver>/<backend>/<pal>/work/<cat>/<name>/` at build time — `vendor/` is never mutated, and `tools/audit/audit_vendor_clean.sh` enforces 0 byte/digest drift.
 

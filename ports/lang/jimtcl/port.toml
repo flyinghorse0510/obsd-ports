@@ -47,6 +47,19 @@ configure_args = [
     "CCACHE=none",
 ]
 
+[versions."8.0"]
+configure_args = [
+    "--prefix=/usr/local",
+    "--sysconfdir=/usr/local/etc",
+    "--mandir=/usr/local/man",
+    "--includedir=/usr/local/include/jim",
+    "--disable-docs",
+    "--full",
+    "--compat",
+    "--with-ext=sqlite3,zlib",
+    "CCACHE=none",
+]
+
 [[applets]]
 sym = "jimsh"
 binary = "/usr/local/bin/jimsh"

@@ -1192,7 +1192,7 @@ def main() -> int:
 
     p_r = sub.add_parser("run-guest")
     p_r.add_argument("--libobsdcompat-root", required=True)
-    p_r.add_argument("--openbsd-version", default="7.9")
+    p_r.add_argument("--openbsd-version", default="8.0")
     p_r.add_argument("--ports-lane-dir", required=True)
     p_r.add_argument("--cmd", default="uname -a")
     p_r.add_argument("--script-file", default="")

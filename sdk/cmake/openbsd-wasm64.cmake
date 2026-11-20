@@ -1,5 +1,5 @@
 # sdk/cmake/openbsd-wasm64.cmake -- CMake cross-compilation toolchain for
-# OpenBSD 7.8 / 7.9 WASM64 guest ports (`emulate/emscripten`).
+# OpenBSD 7.8 / 7.9 / 8.0 WASM64 guest ports (`emulate/emscripten`).
 
 set(CMAKE_SYSTEM_NAME OpenBSD)
 set(CMAKE_SYSTEM_PROCESSOR aarch64)
@@ -7,7 +7,7 @@ set(CMAKE_SYSTEM_PROCESSOR aarch64)
 if(DEFINED ENV{OPENBSD_VERSION} AND NOT "$ENV{OPENBSD_VERSION}" STREQUAL "")
   set(CMAKE_SYSTEM_VERSION "$ENV{OPENBSD_VERSION}")
 else()
-  set(CMAKE_SYSTEM_VERSION "7.9")
+  set(CMAKE_SYSTEM_VERSION "8.0")
 endif()
 
 get_filename_component(_OBSD_SDK_DIR "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)

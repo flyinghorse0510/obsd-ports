@@ -49,3 +49,16 @@ configure_args = [
     "--enable-all",
     "--with-readline-ldflags=-ledit -lcurses",
 ]
+
+[versions."8.0"]
+configure_args = [
+    "--prefix=/usr/local",
+    "--sysconfdir=/etc",
+    "--mandir=/usr/local/man",
+    "--disable-shared",
+    "--enable-static",
+    "--soname=none",
+    "--disable-tcl",
+    "--enable-all",
+    "--with-readline-ldflags=-ledit -lcurses",
+]

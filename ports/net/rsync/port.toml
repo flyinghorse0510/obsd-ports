@@ -28,3 +28,18 @@ configure_args = [
 sym = "rsync"
 binary = "/usr/local/bin/rsync"
 paths = ["/usr/local/bin/rsync"]
+
+[versions."8.0"]
+configure_args = [
+    "--disable-md2man",
+    "--disable-idn",
+    "--disable-simd",
+    "--disable-asm",
+    "--disable-roll-simd",
+    "--with-included-popt",
+    "--with-rsh=/usr/bin/ssh",
+    "--enable-zstd",
+    "--enable-lz4",
+    "--enable-xxhash",
+    "--enable-iconv",
+]

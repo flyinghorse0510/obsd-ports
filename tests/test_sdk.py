@@ -498,7 +498,7 @@ def main() -> int:
 
     obsd_root = resolve_obsd_root(args.libobsdcompat_root)
     target = args.openbsd_version.strip()
-    versions: List[str] = ["7.8", "7.9"] if target in ("", "all") else [v.strip() for v in target.split(",") if v.strip()]
+    versions: List[str] = ["7.8", "7.9", "8.0"] if target in ("", "all") else [v.strip() for v in target.split(",") if v.strip()]
 
     test_lzip_extraction()
     for ver in versions:

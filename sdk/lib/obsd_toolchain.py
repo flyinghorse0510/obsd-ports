@@ -184,7 +184,7 @@ def resolve_libobsdcompat_root() -> pathlib.Path:
 
 class ToolchainContext:
     def __init__(self) -> None:
-        self.openbsd_version = os.environ.get("OPENBSD_VERSION", "7.9").strip() or "7.9"
+        self.openbsd_version = os.environ.get("OPENBSD_VERSION", "8.0").strip() or "8.0"
         self.backend = os.environ.get("COMPAT_BACKEND", "emulate").strip() or "emulate"
         self.pal = os.environ.get("COMPAT_PAL", "emscripten").strip() or "emscripten"
         self.obsd_root = resolve_libobsdcompat_root()

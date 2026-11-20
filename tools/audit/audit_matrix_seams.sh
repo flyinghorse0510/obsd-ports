@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# audit_matrix_seams.sh -- Verify release axis (`7.8`, `7.9`) and Backend x PAL
+# audit_matrix_seams.sh -- Verify release axis (`7.8`, `7.9`, `8.0`) and Backend x PAL
 # matrix (`emulate`, `translate` x `emscripten`, `wasi`, `darwin`, `linux`)
 # consistency across manifests, Make fragments, and target adapter directories.
 set -euo pipefail
@@ -31,8 +31,8 @@ for raw in (root / "config/versions/index.tsv").read_text(encoding="utf-8").spli
     if len(sha) != 64:
         raise SystemExit(f"matrix audit failed: invalid SHA256 for {ver}")
 
-if len(ver_rows) < 2:
-    raise SystemExit("matrix audit failed: expected at least OpenBSD 7.8 and 7.9 in config/versions/index.tsv")
+if len(ver_rows) < 3:
+    raise SystemExit("matrix audit failed: expected at least OpenBSD 7.8, 7.9, and 8.0 in config/versions/index.tsv")
 
 # 2. Verify config/matrix/index.tsv
 mat_rows = []

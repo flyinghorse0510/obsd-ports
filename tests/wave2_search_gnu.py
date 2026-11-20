@@ -475,7 +475,7 @@ def main() -> int:
     ap.add_argument(
         "--openbsd-version",
         default=os.environ.get("OPENBSD_VERSION", "all"),
-        help="Target OpenBSD version (7.8, 7.9, or all)",
+        help="Target OpenBSD version (7.8, 7.9, 8.0, or all)",
     )
     ap.add_argument("--libobsdcompat-root", default="")
     ap.add_argument("--ports-lane-dir", default="")
@@ -483,7 +483,7 @@ def main() -> int:
 
     obsd_root = resolve_obsd_root(args.libobsdcompat_root)
     target = args.openbsd_version.strip()
-    versions: List[str] = ["7.8", "7.9"] if target in ("", "all") else [v.strip() for v in target.split(",") if v.strip()]
+    versions: List[str] = ["7.8", "7.9", "8.0"] if target in ("", "all") else [v.strip() for v in target.split(",") if v.strip()]
 
     for ver in versions:
         t0 = time.monotonic()

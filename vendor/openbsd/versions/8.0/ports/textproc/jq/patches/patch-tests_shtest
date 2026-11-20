@@ -1,0 +1,21 @@
+fix #!
+don't test_no_color, it uses script -q (unsupported)
+
+Index: tests/shtest
+--- tests/shtest.orig
++++ tests/shtest
+@@ -1,4 +1,4 @@
+-#!/bin/sh -x
++#!/usr/local/bin/bash -x
+ 
+ . "${0%/*}/setup" "$@"
+ 
+@@ -641,7 +641,7 @@ done
+ unset JQ_COLORS
+ 
+ # Check $NO_COLOR
+-test_no_color=true
++test_no_color=false
+ $msys  && test_no_color=false
+ $mingw && test_no_color=false
+ $sunos && test_no_color=false

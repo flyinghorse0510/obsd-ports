@@ -90,6 +90,19 @@ EXPECTED_PKGS_BY_VER: Dict[str, List[str]] = {
         "libarchive-3.8.7.tgz",
         "p7zip-17.06.tgz",
     ],
+    "8.0": [
+        "wget-1.25.0.tgz",
+        "rsync-3.5.1.tgz",
+        "socat-1.7.4.1.tgz",
+        "iperf3-3.20.tgz",
+        "links-1.03.tgz",
+        "zip-3.0.tgz",
+        "unzip-6.0.tgz",
+        "pigz-2.8.tgz",
+        "gtar-1.35.tgz",
+        "libarchive-3.8.9.tgz",
+        "7zip-26.03.tgz",
+    ],
 }
 
 STATIC_LIB_PROBE_C = r"""
@@ -704,14 +717,14 @@ def run_guest_suite(ver: str, obsd_root: pathlib.Path, lane_dir: pathlib.Path, t
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--openbsd-version", default="all", choices=("7.8", "7.9", "all"))
+    ap.add_argument("--openbsd-version", default="all", choices=("7.8", "7.9", "8.0", "all"))
     ap.add_argument("--libobsdcompat-root", default="")
     ap.add_argument("--ports-lane-dir", default="")
     ap.add_argument("--timeout-ms", type=int, default=240000)
     args = ap.parse_args()
 
     obsd_root = resolve_obsd_root(args.libobsdcompat_root)
-    versions = ["7.8", "7.9"] if args.openbsd_version == "all" else [args.openbsd_version]
+    versions = ["7.8", "7.9", "8.0"] if args.openbsd_version == "all" else [args.openbsd_version]
 
     for ver in versions:
         lane_dir = (
