@@ -27,6 +27,8 @@ import zlib
 from typing import List
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "tools/config"))
+import obsd_versions  # noqa: E402  (release axis from config/versions/index.tsv)
 if str(REPO_ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "tools"))
 if str(REPO_ROOT / "targets/emulate/emscripten") not in sys.path:
@@ -498,7 +500,7 @@ def main() -> int:
 
     obsd_root = resolve_obsd_root(args.libobsdcompat_root)
     target = args.openbsd_version.strip()
-    versions: List[str] = ["7.8", "7.9", "8.0"] if target in ("", "all") else [v.strip() for v in target.split(",") if v.strip()]
+    versions: List[str] = obsd_versions.resolve_versions(target)
 
     test_lzip_extraction()
     for ver in versions:

@@ -1,17 +1,28 @@
 # sdk/cmake/openbsd-wasm64.cmake -- CMake cross-compilation toolchain for
-# OpenBSD 7.8 / 7.9 / 8.0 WASM64 guest ports (`emulate/emscripten`).
+# OpenBSD WASM64 guest ports (`emulate/emscripten`); releases come from config/versions/index.tsv.
 
 set(CMAKE_SYSTEM_NAME OpenBSD)
 set(CMAKE_SYSTEM_PROCESSOR aarch64)
 
+get_filename_component(_OBSD_SDK_DIR "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+get_filename_component(_OBSD_REPO_DIR "${_OBSD_SDK_DIR}/.." ABSOLUTE)
+
 if(DEFINED ENV{OPENBSD_VERSION} AND NOT "$ENV{OPENBSD_VERSION}" STREQUAL "")
   set(CMAKE_SYSTEM_VERSION "$ENV{OPENBSD_VERSION}")
 else()
-  set(CMAKE_SYSTEM_VERSION "8.0")
+  # Default = newest `verified` release in config/versions/index.tsv.
+  file(STRINGS "${_OBSD_REPO_DIR}/config/versions/index.tsv" _OBSD_REL_ROWS REGEX "^[0-9]+\\.[0-9]+\tverified\t")
+  set(_OBSD_RELS "")
+  foreach(_row IN LISTS _OBSD_REL_ROWS)
+    string(REGEX MATCH "^[0-9]+\\.[0-9]+" _rel "${_row}")
+    list(APPEND _OBSD_RELS "${_rel}")
+  endforeach()
+  if(NOT _OBSD_RELS)
+    message(FATAL_ERROR "openbsd-wasm64.cmake: no verified releases in ${_OBSD_REPO_DIR}/config/versions/index.tsv")
+  endif()
+  list(SORT _OBSD_RELS COMPARE NATURAL)
+  list(GET _OBSD_RELS -1 CMAKE_SYSTEM_VERSION)
 endif()
-
-get_filename_component(_OBSD_SDK_DIR "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
-get_filename_component(_OBSD_REPO_DIR "${_OBSD_SDK_DIR}/.." ABSOLUTE)
 
 if(DEFINED ENV{OBSD_STAGE_DIR} AND NOT "$ENV{OBSD_STAGE_DIR}" STREQUAL "")
   set(_OBSD_STAGE_DIR "$ENV{OBSD_STAGE_DIR}")

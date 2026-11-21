@@ -31,6 +31,8 @@ import sys
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT / "tools/config"))
+import obsd_versions  # noqa: E402  (release axis from config/versions/index.tsv)
 
 MINIMAL_BASE_SYMS = {
     "ksh",
@@ -1214,7 +1216,7 @@ def main() -> int:
 
     p_r = sub.add_parser("run-guest")
     p_r.add_argument("--libobsdcompat-root", required=True)
-    p_r.add_argument("--openbsd-version", default="8.0")
+    p_r.add_argument("--openbsd-version", default=obsd_versions.default_version())
     p_r.add_argument("--ports-lane-dir", required=True)
     p_r.add_argument("--cmd", default="uname -a")
     p_r.add_argument("--script-file", default="")

@@ -17,9 +17,6 @@ required_dirs=(
 	sdk/lib
 	sdk/autoconf
 	sdk/cmake
-	vendor/openbsd/versions/7.8/ports
-	vendor/openbsd/versions/7.9/ports
-	vendor/openbsd/versions/8.0/ports
 	targets/emulate/emscripten
 	targets/emulate/darwin
 	targets/emulate/wasi
@@ -31,6 +28,12 @@ required_dirs=(
 	tools/testing
 	docs
 )
+
+# Per-release dirs/files come from config/versions/index.tsv (never hardcoded).
+while IFS= read -r rel; do
+	[ -n "$rel" ] || continue
+	required_dirs+=("vendor/openbsd/versions/$rel/ports")
+done < <(python3 -I tools/config/obsd_versions.py list)
 
 for d in "${required_dirs[@]}"; do
 	if [ ! -d "$d" ]; then
@@ -44,12 +47,6 @@ required_files=(
 	.gitignore
 	README.md
 	config/versions/index.tsv
-	config/versions/7.8.mk
-	config/versions/7.9.mk
-	config/versions/8.0.mk
-	config/versions/7.8-catalog.tsv
-	config/versions/7.9-catalog.tsv
-	config/versions/8.0-catalog.tsv
 	config/matrix/index.tsv
 	sdk/bin/obsd-cc
 	sdk/bin/obsd-c++
@@ -62,11 +59,18 @@ required_files=(
 	sdk/autoconf/config.site
 	sdk/cmake/openbsd-wasm64.cmake
 	tools/build_ports.py
+	tools/config/obsd_versions.py
+	sdk/lib/obsd-python.sh
 	tools/vendor/sync_openbsd_ports.py
 	tools/vendor/import_port.py
 	tools/audit/vendor-baseline.tsv
 	targets/emulate/emscripten/package_wasm.py
 )
+
+while IFS= read -r rel; do
+	[ -n "$rel" ] || continue
+	required_files+=("config/versions/$rel.mk" "config/versions/$rel-catalog.tsv")
+done < <(python3 -I tools/config/obsd_versions.py list)
 
 for f in "${required_files[@]}"; do
 	if [ ! -f "$f" ]; then

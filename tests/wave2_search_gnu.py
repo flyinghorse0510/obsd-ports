@@ -24,6 +24,8 @@ import time
 from typing import List, Set
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "tools/config"))
+import obsd_versions  # noqa: E402  (release axis from config/versions/index.tsv)
 
 EXPECTED_APPLETS = {
     "/usr/local/bin/ugrep",
@@ -475,7 +477,7 @@ def main() -> int:
     ap.add_argument(
         "--openbsd-version",
         default=os.environ.get("OPENBSD_VERSION", "all"),
-        help="Target OpenBSD version (7.8, 7.9, 8.0, or all)",
+        help="OpenBSD release(s) from config/versions/index.tsv: comma/space separated, or all",
     )
     ap.add_argument("--libobsdcompat-root", default="")
     ap.add_argument("--ports-lane-dir", default="")
@@ -483,7 +485,7 @@ def main() -> int:
 
     obsd_root = resolve_obsd_root(args.libobsdcompat_root)
     target = args.openbsd_version.strip()
-    versions: List[str] = ["7.8", "7.9", "8.0"] if target in ("", "all") else [v.strip() for v in target.split(",") if v.strip()]
+    versions: List[str] = obsd_versions.resolve_versions(target)
 
     for ver in versions:
         t0 = time.monotonic()

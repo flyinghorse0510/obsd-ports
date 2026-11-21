@@ -20,6 +20,8 @@ import sys
 import tempfile
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / "tools/config"))
+import obsd_versions  # noqa: E402  (release axis from config/versions/index.tsv)
 
 
 def find_node_dir(obsd_root: pathlib.Path) -> Optional[pathlib.Path]:
@@ -93,16 +95,24 @@ def verify_sdk_smoke(openbsd_version: str, obsd_root: pathlib.Path) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--openbsd-version", default="8.0")
+    ap.add_argument("--openbsd-version", default=obsd_versions.env_or_default_version())
     ap.add_argument("--backend", default="emulate")
     ap.add_argument("--pal", default="emscripten")
     ap.add_argument("--libobsdcompat-root", required=True)
     ap.add_argument("--port", default="")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 8)
     args = ap.parse_args()
+    obsd_versions.require_verified(args.openbsd_version)
 
     obsd_root = pathlib.Path(args.libobsdcompat_root).resolve()
     lane_dir = REPO_ROOT / "build/openbsd" / args.openbsd_version / args.backend / args.pal
+
+    rc_axis = subprocess.run(
+        [sys.executable, "-I", str(REPO_ROOT / "tests/test_release_axis.py"), "--libobsdcompat-root", str(obsd_root)],
+        cwd=str(REPO_ROOT),
+    ).returncode
+    if rc_axis != 0:
+        return rc_axis
 
     verify_sdk_smoke(args.openbsd_version, obsd_root)
 

@@ -40,6 +40,8 @@ import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "tools/config"))
+import obsd_versions  # noqa: E402  (release axis from config/versions/index.tsv)
 
 REQUIRED_STATIC_LIBS = [
     "libbz2.a",
@@ -1453,7 +1455,7 @@ def main() -> int:
     ap.add_argument(
         "--openbsd-version",
         default=os.environ.get("OPENBSD_VERSION", "all"),
-        help="Target OpenBSD version (7.8, 7.9, 8.0, or all)",
+        help="OpenBSD release(s) from config/versions/index.tsv: comma/space separated, or all",
     )
     ap.add_argument("--libobsdcompat-root", default="")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 8)
@@ -1462,7 +1464,7 @@ def main() -> int:
 
     obsd_root = resolve_obsd_root(args.libobsdcompat_root)
     target = args.openbsd_version.strip()
-    versions = ["7.8", "7.9", "8.0"] if target in ("", "all") else [v.strip() for v in target.split(",") if v.strip()]
+    versions = obsd_versions.resolve_versions(target)
 
     for ver in versions:
         run_single_release_check(ver, obsd_root, args.jobs)

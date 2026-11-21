@@ -34,6 +34,8 @@ import time
 from typing import Dict, List, Optional, Set, Tuple
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "tools/config"))
+import obsd_versions  # noqa: E402  (release axis from config/versions/index.tsv)
 
 SLICE_C_APPLETS = [
     "/usr/local/bin/wget",
@@ -717,14 +719,14 @@ def run_guest_suite(ver: str, obsd_root: pathlib.Path, lane_dir: pathlib.Path, t
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--openbsd-version", default="all", choices=("7.8", "7.9", "8.0", "all"))
+    ap.add_argument("--openbsd-version", default="all")
     ap.add_argument("--libobsdcompat-root", default="")
     ap.add_argument("--ports-lane-dir", default="")
     ap.add_argument("--timeout-ms", type=int, default=240000)
     args = ap.parse_args()
 
     obsd_root = resolve_obsd_root(args.libobsdcompat_root)
-    versions = ["7.8", "7.9", "8.0"] if args.openbsd_version == "all" else [args.openbsd_version]
+    versions = obsd_versions.resolve_versions(args.openbsd_version)
 
     for ver in versions:
         lane_dir = (

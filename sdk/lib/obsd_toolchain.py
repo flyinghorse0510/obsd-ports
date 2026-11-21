@@ -39,6 +39,8 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 SDK_ROOT = pathlib.Path(__file__).resolve().parents[1]
 REPO_ROOT = SDK_ROOT.parent
+sys.path.insert(0, str(REPO_ROOT / "tools/config"))
+import obsd_versions  # noqa: E402  (release axis from config/versions/index.tsv)
 
 # Base OpenBSD libraries provided directly inside `libobsdc-wasm-<ver>.a`.
 # Deliberately excludes absent libraries (iconv, intl, panel, form, menu, etc.)
@@ -186,7 +188,7 @@ def resolve_libobsdcompat_root() -> pathlib.Path:
 
 class ToolchainContext:
     def __init__(self) -> None:
-        self.openbsd_version = os.environ.get("OPENBSD_VERSION", "8.0").strip() or "8.0"
+        self.openbsd_version = obsd_versions.env_or_default_version()
         self.backend = os.environ.get("COMPAT_BACKEND", "emulate").strip() or "emulate"
         self.pal = os.environ.get("COMPAT_PAL", "emscripten").strip() or "emscripten"
         self.obsd_root = resolve_libobsdcompat_root()

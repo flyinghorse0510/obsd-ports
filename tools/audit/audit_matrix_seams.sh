@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# audit_matrix_seams.sh -- Verify release axis (`7.8`, `7.9`, `8.0`) and Backend x PAL
-# matrix (`emulate`, `translate` x `emscripten`, `wasi`, `darwin`, `linux`)
-# consistency across manifests, Make fragments, and target adapter directories.
+# audit_matrix_seams.sh -- Verify the release axis (config/versions/index.tsv) and
+# Backend x PAL matrix (config/matrix/index.tsv) consistency across manifests,
+# Make fragments, and target adapter directories. Releases are never hardcoded:
+# tools/config/obsd_versions.py also checks index.tsv <-> <ver>.mk agreement and,
+# when libobsdcompat is declared, the vendor sys/sys/param.h osrev and that every
+# release is verified in libobsdcompat's own versions/index.tsv.
 set -euo pipefail
 
 repo_root=${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
@@ -31,8 +34,8 @@ for raw in (root / "config/versions/index.tsv").read_text(encoding="utf-8").spli
     if len(sha) != 64:
         raise SystemExit(f"matrix audit failed: invalid SHA256 for {ver}")
 
-if len(ver_rows) < 3:
-    raise SystemExit("matrix audit failed: expected at least OpenBSD 7.8, 7.9, and 8.0 in config/versions/index.tsv")
+if not ver_rows:
+    raise SystemExit("matrix audit failed: no releases declared in config/versions/index.tsv")
 
 # 2. Verify config/matrix/index.tsv
 mat_rows = []
@@ -54,3 +57,5 @@ for raw in (root / "config/matrix/index.tsv").read_text(encoding="utf-8").splitl
 
 print(f"matrix seams audit: ok ({len(ver_rows)} releases x {len(mat_rows)} backend/PAL cells verified)")
 PY_EOF
+
+python3 -I "$repo_root/tools/config/obsd_versions.py" check

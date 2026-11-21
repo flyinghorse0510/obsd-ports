@@ -27,6 +27,8 @@ import tempfile
 from typing import Dict, List, Set, Tuple
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "tools/config"))
+import obsd_versions  # noqa: E402  (release axis from config/versions/index.tsv)
 
 EXPECTED_VERSIONS: Dict[str, Dict[str, str]] = {
     "7.8": {
@@ -948,7 +950,7 @@ def main() -> int:
 
     obsd_root = resolve_obsd_root(args.libobsdcompat_root)
     req = args.openbsd_version.strip()
-    versions = ["7.8", "7.9", "8.0"] if req in ("", "all") else [v.strip() for v in req.split(",") if v.strip()]
+    versions = obsd_versions.resolve_versions(req)
     for v in versions:
         run_version_suite(v, obsd_root, args.ports_lane_dir)
     return 0
