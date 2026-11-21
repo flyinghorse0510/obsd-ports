@@ -8,7 +8,7 @@ cppflags = [
 ]
 
 pre_configure = [
-    "sed -i 's,\\${PREFIX},/usr/local,g' \"$WRKSRC/support/rrsync\"",
+    "sed -i.bak 's,\\${PREFIX},/usr/local,g' \"$WRKSRC/support/rrsync\" && rm -f \"$WRKSRC/support/rrsync.bak\"",
 ]
 
 configure_args = [

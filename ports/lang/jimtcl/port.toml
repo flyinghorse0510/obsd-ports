@@ -12,11 +12,11 @@ skip_vendor_patches = [
 ]
 
 pre_configure = [
-    "sed -i 's|\\${LOCALBASE}|/usr/local|g' initjimsh.tcl",
+    "sed -i.bak 's|\\${LOCALBASE}|/usr/local|g' initjimsh.tcl && rm -f initjimsh.tcl.bak",
 ]
 
 post_configure = [
-    "sed -i 's|-Wl,-rpath -Wl,[^ ]*||g' Makefile",
+    "sed -i.bak 's|-Wl,-rpath -Wl,[^ ]*||g' Makefile && rm -f Makefile.bak",
 ]
 
 [env]

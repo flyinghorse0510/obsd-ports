@@ -12,6 +12,7 @@ configure_args = [
 
 [env]
 ac_cv_func_mkfifo = "no"
+MAKEINFO = "true"
 
 [[applets]]
 sym = "gmake"

@@ -2,6 +2,7 @@ port = "lang/gawk"
 build_style = "gnu"
 separate_build = true
 use_gmake = true
+make_args = ["AR=obsd-ar"]
 
 configure_args = [
     "--disable-nls",
@@ -13,7 +14,7 @@ configure_args = [
 
 post_install = [
     "rm -f \"$STAGE_DIR/usr/local/bin/awk\" \"$STAGE_DIR\"/usr/local/bin/gawk-*",
-    "if [ -f \"$STAGE_DIR/usr/local/bin/gawkbug\" ]; then sed -i '1s|^#!.*|#!/bin/sh|' \"$STAGE_DIR/usr/local/bin/gawkbug\"; fi",
+    "if [ -f \"$STAGE_DIR/usr/local/bin/gawkbug\" ]; then sed -i.bak '1s|^#!.*|#!/bin/sh|' \"$STAGE_DIR/usr/local/bin/gawkbug\" && rm -f \"$STAGE_DIR/usr/local/bin/gawkbug.bak\"; fi",
     "rm -rf \"$STAGE_DIR/etc/profile.d\"",
 ]
 

@@ -3,7 +3,7 @@ build_style = "gnu"
 use_gmake = true
 
 pre_configure = [
-    "sed -i 's,\\${LOCALBASE},/usr/local,g' \"$WRKSRC/doc/socat.1\" \"$WRKSRC/doc/socat.html\"",
+    "sed -i.bak 's,\\${LOCALBASE},/usr/local,g' \"$WRKSRC/doc/socat.1\" \"$WRKSRC/doc/socat.html\" && rm -f \"$WRKSRC/doc/socat.1.bak\" \"$WRKSRC/doc/socat.html.bak\"",
 ]
 
 configure_args = [
@@ -11,7 +11,7 @@ configure_args = [
 ]
 
 post_configure = [
-    "sed -i -e 's/^#define HAVE_DEV_PTMX.*/\\/\\* #undef HAVE_DEV_PTMX \\*\\//' -e 's/^#define HAVE_PROC_DIR.*/\\/\\* #undef HAVE_PROC_DIR \\*\\//' -e 's/^#define HAVE_PROC_DIR_FD.*/\\/\\* #undef HAVE_PROC_DIR_FD \\*\\//' \"$WRKBUILD/config.h\"",
+    "sed -i.bak -e 's/^#define HAVE_DEV_PTMX.*/\\/\\* #undef HAVE_DEV_PTMX \\*\\//' -e 's/^#define HAVE_PROC_DIR.*/\\/\\* #undef HAVE_PROC_DIR \\*\\//' -e 's/^#define HAVE_PROC_DIR_FD.*/\\/\\* #undef HAVE_PROC_DIR_FD \\*\\//' \"$WRKBUILD/config.h\" && rm -f \"$WRKBUILD/config.h.bak\"",
 ]
 
 [env]

@@ -5,7 +5,7 @@ separate_build = true
 use_gmake = true
 
 pre_configure = [
-    "sed -i 's,\\${SYSCONFDIR},/usr/local/etc,g' \"$WRKSRC/doc/sample.wgetrc\" \"$WRKSRC/doc/wget.texi\"",
+    "sed -i.bak 's,\\${SYSCONFDIR},/usr/local/etc,g' \"$WRKSRC/doc/sample.wgetrc\" \"$WRKSRC/doc/wget.texi\" && rm -f \"$WRKSRC/doc/sample.wgetrc.bak\" \"$WRKSRC/doc/wget.texi.bak\"",
     "touch -r \"$WRKSRC/configure\" \"$WRKSRC/doc/wget.texi\"",
 ]
 
@@ -23,7 +23,7 @@ configure_args = [
 
 post_install = [
     "mkdir -p \"$STAGE_DIR/usr/local/etc\"",
-    "if [ -f \"$STAGE_DIR/usr/local/etc/wgetrc\" ]; then sed -i '/^[[:space:]]*ca_certificate[[:space:]]*=/d' \"$STAGE_DIR/usr/local/etc/wgetrc\"; fi",
+    "if [ -f \"$STAGE_DIR/usr/local/etc/wgetrc\" ]; then sed -i.bak '/^[[:space:]]*ca_certificate[[:space:]]*=/d' \"$STAGE_DIR/usr/local/etc/wgetrc\" && rm -f \"$STAGE_DIR/usr/local/etc/wgetrc.bak\"; fi",
     "printf '\\nca_certificate = /etc/ssl/cert.pem\\n' >> \"$STAGE_DIR/usr/local/etc/wgetrc\"",
     "chmod 0644 \"$STAGE_DIR/usr/local/etc/wgetrc\"",
 ]

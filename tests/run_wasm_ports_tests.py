@@ -42,6 +42,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "tools/config"))
 import obsd_versions  # noqa: E402  (release axis from config/versions/index.tsv)
+import obsd_env  # noqa: E402  (EMSDK_PYTHON pinning)
 
 REQUIRED_STATIC_LIBS = [
     "libbz2.a",
@@ -1406,16 +1407,26 @@ def run_single_release_check(ver: str, obsd_root: pathlib.Path, jobs: int) -> No
     if not cert_found:
         raise SystemExit(f"[FAIL/{ver}] no /etc/ssl/cert.pem source found")
 
-    # Stage terminfo entries for OpenBSD libcurses + nano
+    # Stage terminfo entries for OpenBSD libcurses + nano (Linux/BSD: x/xterm; macOS: 78/xterm)
     for rel_ti in ("d/dumb", "x/xterm", "x/xterm-256color", "v/vt100"):
-        for base_ti in ("/usr/share/terminfo", "/lib/terminfo"):
-            cand = pathlib.Path(base_ti) / rel_ti
-            if cand.is_file():
-                staged_files.append((f"/usr/share/terminfo/{rel_ti}", str(cand), 0o444))
+        ti_name = rel_ti.split("/", 1)[1]
+        hex_rel = f"{ord(ti_name[0]):02x}/{ti_name}"
+        found_ti = False
+        for base_ti in ("/usr/share/terminfo", "/lib/terminfo", "/opt/homebrew/share/terminfo"):
+            for sub_rel in (rel_ti, hex_rel):
+                cand = pathlib.Path(base_ti) / sub_rel
+                if cand.is_file():
+                    staged_files.append((f"/usr/share/terminfo/{rel_ti}", str(cand), 0o444))
+                    found_ti = True
+                    break
+            if found_ti:
                 break
 
     # Stage OpenBSD UTF-8 LC_CTYPE if available from prebuilt locale data
     for lc_cand in (
+        REPO_ROOT.parent.parent / f"build/wasm/.work-{ver}/rootfs/LC_CTYPE",
+        REPO_ROOT.parent.parent / "runtime/overlay/usr/share/locale/UTF-8/LC_CTYPE",
+        obsd_root.parent.parent / f"build/wasm/.work-{ver}/rootfs/LC_CTYPE",
         obsd_root.parent.parent / "runtime/overlay/usr/share/locale/UTF-8/LC_CTYPE",
         obsd_root / "vendor/openbsd/versions" / ver / "share/locale/UTF-8/LC_CTYPE",
     ):
@@ -1463,6 +1474,7 @@ def main() -> int:
     args = ap.parse_args()
 
     obsd_root = resolve_obsd_root(args.libobsdcompat_root)
+    obsd_env.ensure_emsdk_python(obsd_root)
     target = args.openbsd_version.strip()
     versions = obsd_versions.resolve_versions(target)
 
