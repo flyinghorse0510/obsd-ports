@@ -6,7 +6,7 @@
 
 Every build is parameterized cleanly across three orthogonal axes:
 
-1. **OpenBSD Release (`OPENBSD_VERSION`)**: `8.0` (default), `7.9`, `7.8` — declared in [`config/versions/index.tsv`](config/versions/index.tsv), backed by SHA256-verified official OpenBSD `ports.tar.gz` catalogs (`config/versions/<ver>-catalog.tsv`, ~10,400–10,750+ ports per release) and immutable port subtrees under `vendor/openbsd/versions/<ver>/ports/`.
+1. **OpenBSD Release (`OPENBSD_VERSION`)**: `8.0` (default), `7.9`, `7.8` — declared in [`config/versions/index.tsv`](config/versions/index.tsv), the single source of truth for the release axis (the default is the newest `verified` row; Make, `tools/build_ports.py`, the SDK and every test resolve releases through [`tools/config/obsd_versions.py`](tools/config/obsd_versions.py), never from a hardcoded list), backed by SHA256-verified official OpenBSD `ports.tar.gz` catalogs (`config/versions/<ver>-catalog.tsv`, ~10,400–10,750+ ports per release) and immutable port subtrees under `vendor/openbsd/versions/<ver>/ports/`.
 2. **Compatibility Backend (`COMPAT_BACKEND`)**: `emulate` (default, crunched multi-call relocatable applets) and `translate` (standalone executables).
 3. **Platform Abstraction Layer (`COMPAT_PAL`)**: `emscripten` (active v1 WASM64 browser & Node.js guest), with clean target seams for `wasi`, `darwin`, and `linux` declared in [`config/matrix/index.tsv`](config/matrix/index.tsv).
 
@@ -23,6 +23,17 @@ All build outputs isolate cleanly under `build/openbsd/<OPENBSD_VERSION>/<COMPAT
    ```
 
 `make clean` works standalone with zero external dependencies.
+
+## Prerequisites & Build Order
+
+- **Python ≥ 3.11** for `build`/`fetch`/`package`/`check`/`list` (`tools/build_ports.py` uses `tomllib`). Make picks the newest `python3.1x` on `PATH` (falling back to `python3`) and fails early with a clear message on an older interpreter; override with `PYTHON=/path/to/python3.11+` (e.g. `PYTHON=/opt/homebrew/bin/python3.13` on macOS, whose `/usr/bin/python3` is 3.9). `sdk/bin/obsd-*` and recipe hooks reuse the same interpreter via `OBSD_PYTHON`. Metadata-only targets (`audit`, `list-catalog`, `import`, `sync-vendor`, `clean`) still run on Python 3.9.
+- **Host tools**: `gmake`, `cmake` (fastfetch), `autoconf`/`automake`/`libtool` (ugrep `autoreconf -fi` on 7.9), `perl`, `bison`, `xxd`, a host `clang`/`cc` (macOS: `brew install make cmake autoconf automake libtool pkgconf`).
+- **libobsdcompat outputs, built first.** obsd-ports never builds libobsdcompat; for `emulate/emscripten` it consumes, per release `<v>`:
+  - `$LIBOBSDCOMPAT_ROOT/deps/emsdk` (bootstrapped by libobsdcompat's `bootstrap_emsdk.sh` / `make wasm-emsdk`),
+  - `$LIBOBSDCOMPAT_ROOT/build/wasm-<v>/include-root-<v>/` and `libobsdc-wasm-<v>.a` (`make -C $LIBOBSDCOMPAT_ROOT COMPAT_BACKEND=emulate COMPAT_PAL=emscripten OPENBSD_VERSION=<v> wasm-guest`),
+  - `$LIBOBSDCOMPAT_ROOT/build/wasm-<v>/libobsd-wasm-host-<v>.a` for `make check` / `merge_wasm_guest.py` (`wasm-host`).
+
+  `make build`/`package` stop with the exact missing paths and the command to produce them. Port stamps fold in a content digest of `sdk/`, `include-root-<v>` and the emsdk release, so a libobsdcompat header change rebuilds dependent ports instead of leaving stale objects. From sonvori-terminal the per-release order is `make web-wasm RELEASE=<v> WEB_WASM_ARGS=--without-ports` → `make web-ports RELEASE=<v>` → `make web-wasm RELEASE=<v>`.
 
 ## Built & Verified Ports Catalog (53 Ports across OpenBSD 7.8, 7.9 & 8.0)
 

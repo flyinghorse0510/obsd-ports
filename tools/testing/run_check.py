@@ -22,6 +22,7 @@ import tempfile
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "tools/config"))
 import obsd_versions  # noqa: E402  (release axis from config/versions/index.tsv)
+import obsd_env  # noqa: E402  (EMSDK_PYTHON pinning)
 
 
 def find_node_dir(obsd_root: pathlib.Path) -> Optional[pathlib.Path]:
@@ -103,6 +104,7 @@ def main() -> int:
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 8)
     args = ap.parse_args()
     obsd_versions.require_verified(args.openbsd_version)
+    obsd_env.ensure_emsdk_python(args.libobsdcompat_root)
 
     obsd_root = pathlib.Path(args.libobsdcompat_root).resolve()
     lane_dir = REPO_ROOT / "build/openbsd" / args.openbsd_version / args.backend / args.pal

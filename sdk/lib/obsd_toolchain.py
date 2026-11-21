@@ -41,6 +41,7 @@ SDK_ROOT = pathlib.Path(__file__).resolve().parents[1]
 REPO_ROOT = SDK_ROOT.parent
 sys.path.insert(0, str(REPO_ROOT / "tools/config"))
 import obsd_versions  # noqa: E402  (release axis from config/versions/index.tsv)
+import obsd_env  # noqa: E402  (EMSDK_PYTHON pinning)
 
 # Base OpenBSD libraries provided directly inside `libobsdc-wasm-<ver>.a`.
 # Deliberately excludes absent libraries (iconv, intl, panel, form, menu, etc.)
@@ -192,6 +193,7 @@ class ToolchainContext:
         self.backend = os.environ.get("COMPAT_BACKEND", "emulate").strip() or "emulate"
         self.pal = os.environ.get("COMPAT_PAL", "emscripten").strip() or "emscripten"
         self.obsd_root = resolve_libobsdcompat_root()
+        obsd_env.ensure_emsdk_python(self.obsd_root)
 
         stage_env = os.environ.get("OBSD_STAGE_DIR", "").strip()
         if stage_env:

@@ -3,6 +3,7 @@
 all: package
 
 list:
+	@$(REQUIRE_PYTHON)
 	@"$(PYTHON)" -I "$(TOOLS_ROOT)/build_ports.py" list \
 		--openbsd-version "$(OPENBSD_VERSION)" \
 		--backend "$(COMPAT_BACKEND)" \
@@ -10,6 +11,7 @@ list:
 		$(if $(strip $(PORT)),--port "$(PORT)",)
 
 fetch:
+	@$(REQUIRE_PYTHON)
 	"$(PYTHON)" -I "$(TOOLS_ROOT)/build_ports.py" fetch \
 		--openbsd-version "$(OPENBSD_VERSION)" \
 		--backend "$(COMPAT_BACKEND)" \
@@ -18,6 +20,7 @@ fetch:
 		$(if $(strip $(PORT)),--port "$(PORT)",)
 
 build:
+	@$(REQUIRE_PYTHON)
 	@$(REQUIRE_LIBOBSDCOMPAT)
 	LIBOBSDCOMPAT_ROOT="$(LIBOBSDCOMPAT_ROOT)" "$(PYTHON)" -I "$(TOOLS_ROOT)/build_ports.py" build \
 		--openbsd-version "$(OPENBSD_VERSION)" \
@@ -28,6 +31,7 @@ build:
 		$(if $(strip $(PORT)),--port "$(PORT)",)
 
 package: build
+	@$(REQUIRE_PYTHON)
 	@$(REQUIRE_LIBOBSDCOMPAT)
 	LIBOBSDCOMPAT_ROOT="$(LIBOBSDCOMPAT_ROOT)" "$(PYTHON)" -I "$(TOOLS_ROOT)/build_ports.py" package \
 		--openbsd-version "$(OPENBSD_VERSION)" \

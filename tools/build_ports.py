@@ -23,6 +23,16 @@ Commands:
 """
 from __future__ import annotations
 
+import sys
+
+if sys.version_info < (3, 11):  # tomllib (PEP 680) is stdlib only from 3.11 on
+    sys.stderr.write(
+        "build_ports: Python >= 3.11 is required (tomllib); %s is Python %d.%d.\n"
+        "build_ports: run `make ... PYTHON=/path/to/python3.11+` (e.g. PYTHON=/opt/homebrew/bin/python3.13).\n"
+        % ((sys.executable or "python3"), sys.version_info[0], sys.version_info[1])
+    )
+    raise SystemExit(2)
+
 import argparse
 import base64
 import binascii
@@ -40,7 +50,6 @@ import shutil
 import stat
 import struct
 import subprocess
-import sys
 import tarfile
 import tempfile
 import tomllib
@@ -50,6 +59,9 @@ import zlib
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "tools/config"))
+import obsd_versions  # noqa: E402  (release axis from config/versions/index.tsv)
+import obsd_env  # noqa: E402  (EMSDK_PYTHON pinning)
 
 DISTINFO_SHA256_RE = re.compile(r"^SHA256\s*\((.+)\)\s*=\s*(\S+)\s*$")
 DISTINFO_SIZE_RE = re.compile(r"^SIZE\s*\((.+)\)\s*=\s*(\d+)\s*$")
@@ -753,6 +765,57 @@ def get_port_pkgname(vendor_ports_dir: pathlib.Path, vendor_port: str) -> str:
     return pkgname
 
 
+_TOOLCHAIN_DIGESTS: Dict[Tuple[str, str, str], str] = {}
+
+
+def _digest_tree(h: "hashlib._Hash", root: pathlib.Path, label: str) -> None:
+    h.update(f"[{label}]".encode())
+    if not root.exists():
+        h.update(b"<missing>")
+        return
+    for f in sorted(root.rglob("*")):
+        if "__pycache__" in f.parts:
+            continue
+        rel = f.relative_to(root).as_posix().encode()
+        if f.is_symlink():
+            h.update(rel + b"->" + os.readlink(f).encode())
+        elif f.is_file():
+            h.update(rel + b"=" + sha256_file(f).encode())
+
+
+def toolchain_digest(obsd_root: pathlib.Path, openbsd_version: str, pal: str) -> str:
+    """Content digest of everything a port compiles against besides its own
+    sources: sdk/ (wrappers, flags, autoconf/cmake), the libobsdcompat
+    `include-root-<v>` headers, and the emsdk release. Computed once per run."""
+    key = (str(obsd_root), openbsd_version, pal)
+    if key not in _TOOLCHAIN_DIGESTS:
+        h = hashlib.sha256()
+        _digest_tree(h, REPO_ROOT / "sdk", "sdk")
+        if pal == "emscripten":
+            wasm_dir = obsd_root / f"build/wasm-{openbsd_version}"
+            _digest_tree(h, wasm_dir / f"include-root-{openbsd_version}", "include-root")
+            ver_txt = obsd_root / "deps/emsdk/upstream/emscripten/emscripten-version.txt"
+            h.update(b"[emsdk]" + (ver_txt.read_bytes() if ver_txt.is_file() else b"<missing>"))
+        _TOOLCHAIN_DIGESTS[key] = h.hexdigest()
+    return _TOOLCHAIN_DIGESTS[key]
+
+
+def host_python_shim_dir() -> pathlib.Path:
+    """Directory whose `python3` is this (>=3.11) interpreter, so recipe hooks
+    (`python3 -I "$PORT_DIR/..."`) never fall back to an older system python3."""
+    d = REPO_ROOT / ".cache/sdk/host-python"
+    d.mkdir(parents=True, exist_ok=True)
+    link = d / "python3"
+    target = pathlib.Path(sys.executable)
+    if not (link.is_symlink() and os.readlink(link) == str(target)):
+        tmp = d / f".python3.{os.getpid()}"
+        if tmp.is_symlink() or tmp.exists():
+            tmp.unlink()
+        tmp.symlink_to(target)
+        os.replace(tmp, link)
+    return d
+
+
 def make_sdk_env(
     openbsd_version: str,
     backend: str,
@@ -775,6 +838,7 @@ def make_sdk_env(
     env["COMPAT_BACKEND"] = backend
     env["COMPAT_PAL"] = pal
     env["OBSD_STAGE_DIR"] = str(stage_dir)
+    env["OBSD_PYTHON"] = sys.executable  # sdk/bin/obsd-* reuse this >=3.11 interpreter
 
     cc = str(sdk_bin / "obsd-cc")
     cxx = str(sdk_bin / "obsd-c++")
@@ -788,7 +852,7 @@ def make_sdk_env(
     config_site = str(REPO_ROOT / "sdk/autoconf/config.site")
     cmake_tc = str(REPO_ROOT / "sdk/cmake/openbsd-wasm64.cmake")
 
-    env["PATH"] = f"{sdk_bin}:{env.get('PATH', '/usr/bin:/bin')}"
+    env["PATH"] = f"{sdk_bin}:{host_python_shim_dir()}:{env.get('PATH', '/usr/bin:/bin')}"
     env["CC"] = cc
     env["CXX"] = cxx
     env["CPP"] = f"{cc} -E"
@@ -812,6 +876,8 @@ def make_sdk_env(
     env["CC_FOR_BUILD"] = host_cc
     env["BUILD_CC"] = host_cc
     env["HOSTCC"] = host_cc
+    if not shutil.which("makeinfo"):
+        env.setdefault("MAKEINFO", "true")
 
     base_cf = ["-O2", *recipe.get("cflags", [])]
     base_cxxf = ["-O2", *recipe.get("cxxflags", [])]
@@ -917,6 +983,9 @@ def build_single_port(
             sig_h.update(sha256_file(pf).encode())
     for df_path, df_ent in fetched:
         sig_h.update(df_ent["sha256"].encode())
+    # Header/SDK dependencies: a changed libobsdcompat include-root, SDK wrapper
+    # or emsdk release must rebuild ports (no stale objects after a lib update).
+    sig_h.update(toolchain_digest(obsd_root, openbsd_version, pal).encode())
     build_sig = sig_h.hexdigest()
 
     if not force and stamp_file.is_file():
@@ -1011,7 +1080,8 @@ def build_single_port(
         if style in ("gnu", "simple"):
             cfg_rel = recipe.get("configure_script", "./configure")
             cfg_bin = (wrksrc / cfg_rel).resolve() if not os.path.isabs(cfg_rel) else pathlib.Path(cfg_rel)
-            host_arch = platform.machine() or "x86_64"
+            raw_arch = (platform.machine() or "x86_64").lower()
+            host_arch = {"arm64": "aarch64", "amd64": "x86_64"}.get(raw_arch, raw_arch)
             cfg_cmd: List[str] = ["sh", str(cfg_bin)]
             if recipe.get("configure_host", style == "gnu"):
                 cfg_cmd.extend(
@@ -1181,8 +1251,38 @@ def cmd_fetch(args: argparse.Namespace) -> int:
     return 0
 
 
+def require_libobsdcompat_lane_outputs(obsd_root: pathlib.Path, openbsd_version: str, pal: str) -> None:
+    """obsd-ports consumes libobsdcompat build outputs; it never builds them.
+
+    emulate/emscripten needs `$LIBOBSDCOMPAT_ROOT/build/wasm-<v>/` populated by
+    libobsdcompat's `make COMPAT_BACKEND=emulate COMPAT_PAL=emscripten
+    OPENBSD_VERSION=<v> wasm-emsdk wasm-guest` (from sonvori-terminal:
+    `make web-wasm RELEASE=<v> WEB_WASM_ARGS=--without-ports`).
+    """
+    if pal != "emscripten":
+        return
+    wasm_dir = obsd_root / f"build/wasm-{openbsd_version}"
+    need = [
+        obsd_root / "deps/emsdk/upstream/emscripten/emcc",
+        wasm_dir / f"include-root-{openbsd_version}",
+        wasm_dir / f"libobsdc-wasm-{openbsd_version}.a",
+    ]
+    missing = [str(p) for p in need if not p.exists()]
+    if missing:
+        die(
+            "missing libobsdcompat emscripten outputs for OpenBSD "
+            f"{openbsd_version}:\n  " + "\n  ".join(missing) + "\n"
+            "build them first (base guest before ports):\n"
+            f"  make -C {obsd_root} COMPAT_BACKEND=emulate COMPAT_PAL=emscripten "
+            f"OPENBSD_VERSION={openbsd_version} wasm-emsdk wasm-guest\n"
+            f"  (sonvori-terminal: make web-wasm RELEASE={openbsd_version} WEB_WASM_ARGS=--without-ports)"
+        )
+
+
 def cmd_build(args: argparse.Namespace) -> int:
     obsd_root = resolve_obsd_root_arg(args.libobsdcompat_root)
+    require_libobsdcompat_lane_outputs(obsd_root, args.openbsd_version, args.pal)
+    obsd_env.ensure_emsdk_python(obsd_root)
     recipes = discover_recipes(args.openbsd_version, [args.port] if args.port else None)
     lane_dir = REPO_ROOT / "build/openbsd" / args.openbsd_version / args.backend / args.pal
     lane_dir.mkdir(parents=True, exist_ok=True)
@@ -1205,6 +1305,8 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 def cmd_package(args: argparse.Namespace) -> int:
     obsd_root = resolve_obsd_root_arg(args.libobsdcompat_root)
+    require_libobsdcompat_lane_outputs(obsd_root, args.openbsd_version, args.pal)
+    obsd_env.ensure_emsdk_python(obsd_root)
     lane_dir = REPO_ROOT / "build/openbsd" / args.openbsd_version / args.backend / args.pal
     lane_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1253,12 +1355,13 @@ def main() -> int:
     sub = ap.add_subparsers(dest="subcmd", required=True)
 
     p_cat = sub.add_parser("list-catalog")
-    p_cat.add_argument("--openbsd-version", default="8.0")
+    default_ver = obsd_versions.default_version()
+    p_cat.add_argument("--openbsd-version", default=default_ver)
     p_cat.add_argument("--filter", default="")
 
     for name in ("list", "fetch", "build", "package"):
         sp = sub.add_parser(name)
-        sp.add_argument("--openbsd-version", default="8.0")
+        sp.add_argument("--openbsd-version", default=default_ver)
         sp.add_argument("--backend", default="emulate")
         sp.add_argument("--pal", default="emscripten")
         sp.add_argument("--libobsdcompat-root", default="")
@@ -1268,6 +1371,12 @@ def main() -> int:
             sp.add_argument("--force", action="store_true")
 
     args = ap.parse_args()
+    if getattr(args, "libobsdcompat_root", ""):
+        obsd_env.ensure_emsdk_python(args.libobsdcompat_root)
+    try:
+        obsd_versions.require_verified(args.openbsd_version)
+    except obsd_versions.ReleaseConfigError as exc:
+        die(str(exc), 2)
     if args.subcmd == "list-catalog":
         return cmd_list_catalog(args)
     if args.subcmd == "list":
