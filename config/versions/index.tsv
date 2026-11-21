@@ -1,5 +1,5 @@
 # OpenBSD release axis for obsd-ports.
 version	status	api_hex	osrev_int	ports_url	ports_sha256	vendor_dir	catalog_tsv	notes
 7.8	verified	0x0708	202510	https://cdn.openbsd.org/pub/OpenBSD/7.8/ports.tar.gz	1e74343b20805a01e89eabed038ac5f34841de15186efee3900fe39504ab0178	vendor/openbsd/versions/7.8/ports	config/versions/7.8-catalog.tsv	Official OpenBSD 7.8 release ports tree.
-7.9	verified	0x0709	202604	https://cdn.openbsd.org/pub/OpenBSD/7.9/ports.tar.gz	937aef3d19bc288a838bfa168733872c1a33064db7fe00caf60ea29d9476c6db	vendor/openbsd/versions/7.9/ports	config/versions/7.9-catalog.tsv	Official OpenBSD 7.9 release ports tree.
+7.9	verified	0x0709	202605	https://cdn.openbsd.org/pub/OpenBSD/7.9/ports.tar.gz	937aef3d19bc288a838bfa168733872c1a33064db7fe00caf60ea29d9476c6db	vendor/openbsd/versions/7.9/ports	config/versions/7.9-catalog.tsv	Official OpenBSD 7.9 release ports tree.
 8.0	verified	0x0800	202610	https://cdn.openbsd.org/pub/OpenBSD/8.0/ports.tar.gz	7ce3cbd97a19505491a09805be75add594d750cf4abd29b5988c25f1eabc8b28	vendor/openbsd/versions/8.0/ports	config/versions/8.0-catalog.tsv	Official OpenBSD 8.0 release ports tree.
