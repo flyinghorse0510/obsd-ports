@@ -103,16 +103,26 @@ def import_ports_for_version(
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--version", default="all", help="OpenBSD release version (7.8, 7.9, 8.0, or all)")
+    ap.add_argument(
+        "--version",
+        default="all",
+        help="OpenBSD release version (7.8, 7.9, 8.0, comma-separated e.g. 7.9,8.0, or all)",
+    )
     ap.add_argument("ports", nargs="+", help="Port path(s) <category>/<name> [...]")
     args = ap.parse_args()
 
     repo_root = pathlib.Path(__file__).resolve().parents[2]
     portpaths = [normalize_portpath(p) for p in args.ports]
     manifest = sync_mod.load_versions_manifest(repo_root / "config/versions/index.tsv")
-    selected = [r for r in manifest if args.version == "all" or r["version"] == args.version]
-    if not selected:
-        raise SystemExit(f"unknown OpenBSD version '{args.version}'")
+    if args.version == "all":
+        selected = manifest
+    else:
+        wanted_vers = [v.strip() for v in args.version.split(",") if v.strip()]
+        by_ver = {r["version"]: r for r in manifest}
+        unknown = [v for v in wanted_vers if v not in by_ver]
+        if unknown or not wanted_vers:
+            raise SystemExit(f"unknown OpenBSD version '{args.version}'")
+        selected = [by_ver[v] for v in wanted_vers]
 
     for row in selected:
         import_ports_for_version(repo_root, row, portpaths)

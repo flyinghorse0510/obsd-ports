@@ -490,6 +490,148 @@ def test_chunk_boundary_orealloc_guard(openbsd_version: str, obsd_root: pathlib.
     print(f"[SDK-TEST] [{openbsd_version}] 16 MiB chunk guard gap multi-page orealloc+free (28 MiB, MALLOC_OPTIONS=JJ): PASS")
 
 
+def test_only_versions_and_skip_distfiles(obsd_root: pathlib.Path) -> None:
+    with tempfile.TemporaryDirectory(prefix="obsd-test-recipes-") as td:
+        tp = pathlib.Path(td)
+        ports_root = tp / "ports"
+
+        # 1. Test `only_versions` filtering across 7.8, 7.9, 8.0 (full discovery + targeted PORT=...)
+        (ports_root / "devel/common").mkdir(parents=True)
+        (ports_root / "devel/common/port.toml").write_text(
+            'port = "devel/common"\nbuild_style = "make"\n',
+            encoding="utf-8",
+        )
+        (ports_root / "graphics/sd").mkdir(parents=True)
+        (ports_root / "graphics/sd/port.toml").write_text(
+            'port = "graphics/sd"\nonly_versions = ["7.9", "8.0"]\ndepends = ["devel/common"]\nbuild_style = "cmake"\n',
+            encoding="utf-8",
+        )
+        (ports_root / "devel/agent80").mkdir(parents=True)
+        (ports_root / "devel/agent80/port.toml").write_text(
+            'port = "devel/agent80"\nonly_versions = ["8.0"]\ndepends = ["devel/common"]\nbuild_style = "make"\n',
+            encoding="utf-8",
+        )
+
+        r78 = [r["port"] for r in bp.discover_recipes("7.8", ports_root=ports_root)]
+        r79 = [r["port"] for r in bp.discover_recipes("7.9", ports_root=ports_root)]
+        r80 = [r["port"] for r in bp.discover_recipes("8.0", ports_root=ports_root)]
+        assert r78 == ["devel/common"], f"unexpected 7.8 recipes: {r78}"
+        assert r79 == ["devel/common", "graphics/sd"], f"unexpected 7.9 recipes: {r79}"
+        assert r80 == ["devel/common", "devel/agent80", "graphics/sd"] or set(r80) == {"devel/common", "devel/agent80", "graphics/sd"}
+        assert r80[0] == "devel/common"
+
+        # Targeted discovery cleanly skips recipes excluded on an older release without erroring
+        assert bp.discover_recipes("7.8", ["graphics/sd"], ports_root=ports_root) == []
+        assert bp.discover_recipes("7.9", ["devel/agent80"], ports_root=ports_root) == []
+        assert [r["port"] for r in bp.discover_recipes("7.9", ["graphics/sd"], ports_root=ports_root)] == ["devel/common", "graphics/sd"]
+
+        # 2. Test `skip_distfiles` in `fetch_port_distfiles()` and `build_single_port()`
+        fake_repo = tp / "repo"
+        vport_dir = fake_repo / "vendor/openbsd/versions/8.0/ports/audio/mock-whisper"
+        vport_dir.mkdir(parents=True)
+        (fake_repo / "vendor/openbsd/versions/8.0/ports/infrastructure/db").mkdir(parents=True)
+        (fake_repo / "vendor/openbsd/versions/8.0/ports/infrastructure/db/network.conf").write_text("", encoding="utf-8")
+
+        tar_buf = io.BytesIO()
+        with tarfile.open(fileobj=tar_buf, mode="w:gz") as tf:
+            payload = b"#!/bin/sh\necho ok\n"
+            ti = tarfile.TarInfo("mock-whisper-1.0/hello.sh")
+            ti.size = len(payload)
+            ti.mode = 0o755
+            tf.addfile(ti, io.BytesIO(payload))
+        tar_bytes = tar_buf.getvalue()
+        tar_sha = bp.hashlib.sha256(tar_bytes).hexdigest()
+
+        cache_dist = fake_repo / ".cache/distfiles"
+        cache_dist.mkdir(parents=True)
+        (cache_dist / "mock-whisper-1.0.tar.gz").write_bytes(tar_bytes)
+        # Intentionally DO NOT create `ggml-base.en.bin` in `.cache/distfiles` (and give it an unreachable URL):
+        # `fetch_port_distfiles` + `build_single_port` MUST skip it cleanly without downloading or extracting it.
+        (vport_dir / "Makefile").write_text(
+            "DISTNAME =\tmock-whisper-1.0\n"
+            "DISTFILES.ggml =\tggml-base.en.bin\n"
+            "SITES =\thttp://127.0.0.1:9/unreachable/\n"
+            "SITES.ggml =\thttp://127.0.0.1:9/unreachable/\n",
+            encoding="utf-8",
+        )
+        fake_bin_sha = "0" * 64
+        (vport_dir / "distinfo").write_text(
+            f"SHA256 (ggml-base.en.bin) = {fake_bin_sha}\n"
+            f"SHA256 (mock-whisper-1.0.tar.gz) = {tar_sha}\n"
+            f"SIZE (ggml-base.en.bin) = 147964211\n"
+            f"SIZE (mock-whisper-1.0.tar.gz) = {len(tar_bytes)}\n",
+            encoding="utf-8",
+        )
+
+        mock_port_dir = fake_repo / "ports/audio/mock-whisper"
+        mock_port_dir.mkdir(parents=True)
+        (mock_port_dir / "port.toml").write_text(
+            'port = "audio/mock-whisper"\n'
+            'build_style = "script"\n'
+            'skip_distfiles = ["ggml-base.en.bin"]\n'
+            'build_cmd = ["cp hello.sh \\"$STAGE_DIR/usr/local/bin/mock-whisper\\""]\n',
+            encoding="utf-8",
+        )
+        rec = bp.load_recipe(mock_port_dir, "8.0", ports_root=fake_repo / "ports")
+        fetched = bp.fetch_port_distfiles(rec, "8.0", repo_root=fake_repo)
+        assert [ent["filename"] for _, ent in fetched] == ["mock-whisper-1.0.tar.gz"]
+        assert not (cache_dist / "ggml-base.en.bin").exists()
+
+        lane_dir = tp / "lane"
+        built_rec = bp.build_single_port(
+            recipe=rec,
+            openbsd_version="8.0",
+            backend="emulate",
+            pal="emscripten",
+            obsd_root=obsd_root,
+            lane_dir=lane_dir,
+            jobs=1,
+            repo_root=fake_repo,
+        )
+        assert "usr/local/bin/mock-whisper" in built_rec["installed_files"]
+        assert built_rec["signature"]
+
+        # 3. Verify bmake `:S` / `:C` modifiers & `CMAKE_SYSTEM_PROCESSOR` override in `openbsd-wasm64.cmake`
+        env_sd = {"GH_TAGNAME": "master-899-28b454b"}
+        assert bp.expand_openbsd_expr("stable-diffusion.cpp-0.0.${GH_TAGNAME:S/master-//:C/-.+//g}", env_sd) == "stable-diffusion.cpp-0.0.899"
+
+        cmake_probe = tp / "cmake_probe"
+        cmake_probe.mkdir()
+        (cmake_probe / "CMakeLists.txt").write_text(
+            "cmake_minimum_required(VERSION 3.16)\n"
+            "project(proc_probe LANGUAGES NONE)\n"
+            'message(STATUS "PROC=${CMAKE_SYSTEM_PROCESSOR}")\n',
+            encoding="utf-8",
+        )
+        tc_file = REPO_ROOT / "sdk/cmake/openbsd-wasm64.cmake"
+        p_def = subprocess.run(
+            ["cmake", "-S", str(cmake_probe), "-B", str(cmake_probe / "b_def"), f"-DCMAKE_TOOLCHAIN_FILE={tc_file}"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=True,
+        )
+        assert "PROC=aarch64" in p_def.stdout, p_def.stdout
+        p_ovr = subprocess.run(
+            [
+                "cmake",
+                "-S",
+                str(cmake_probe),
+                "-B",
+                str(cmake_probe / "b_ovr"),
+                f"-DCMAKE_TOOLCHAIN_FILE={tc_file}",
+                "-DCMAKE_SYSTEM_PROCESSOR=wasm64",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=True,
+        )
+        assert "PROC=wasm64" in p_ovr.stdout, p_ovr.stdout
+
+    print("[SDK-TEST] only_versions + skip_distfiles + CMAKE_SYSTEM_PROCESSOR override: PASS")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--openbsd-version", default=os.environ.get("OPENBSD_VERSION", "all"))
@@ -501,6 +643,7 @@ def main() -> int:
     versions: List[str] = ["7.8", "7.9", "8.0"] if target in ("", "all") else [v.strip() for v in target.split(",") if v.strip()]
 
     test_lzip_extraction()
+    test_only_versions_and_skip_distfiles(obsd_root)
     for ver in versions:
         test_symlink_alias_discovery(ver, obsd_root)
         test_cxx17_build_localize_and_run(ver, obsd_root)

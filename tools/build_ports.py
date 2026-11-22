@@ -54,9 +54,8 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 DISTINFO_SHA256_RE = re.compile(r"^SHA256\s*\((.+)\)\s*=\s*(\S+)\s*$")
 DISTINFO_SIZE_RE = re.compile(r"^SIZE\s*\((.+)\)\s*=\s*(\d+)\s*$")
 VAR_ASSIGN_RE = re.compile(r"^([A-Za-z0-9_.+-]+?)\s*([+?:!]?=)\s*(.*)$")
-SIMPLE_VAR_RE = re.compile(
-    r"\$\{([A-Za-z0-9_.+-]+)(?::=([^}]*))?(?::([RL]))?\}|\$\(([A-Za-z0-9_.+-]+)\)|\$([A-Za-z0-9_])"
-)
+BRACED_VAR_RE = re.compile(r"\$\{([^{}]+)\}")
+SIMPLE_PAREN_OR_CHAR_VAR_RE = re.compile(r"\$\(([A-Za-z0-9_.+-]+)\)|\$([A-Za-z0-9_])")
 
 
 def die(msg: str, code: int = 1) -> "NoReturn":
@@ -222,26 +221,119 @@ def parse_openbsd_makefile_vars(paths: Sequence[pathlib.Path]) -> Dict[str, str]
     return env
 
 
+def _apply_bmake_modifiers(val: str, mods_str: str) -> str:
+    if mods_str.startswith("="):
+        sub = mods_str[1:]
+        return " ".join(t + sub for t in val.split())
+
+    pos = 0
+    n = len(mods_str)
+    cur = val
+    while pos < n:
+        ch = mods_str[pos]
+        if ch in ("R", "L") and (pos + 1 == n or mods_str[pos + 1] == ":"):
+            if ch == "R":
+                if " " in cur:
+                    cur = " ".join(t.rsplit(".", 1)[0] if "." in t else t for t in cur.split())
+                else:
+                    cur = cur.rsplit(".", 1)[0] if "." in cur else cur
+            else:
+                cur = cur.lower()
+            pos += 2 if (pos + 1 < n and mods_str[pos + 1] == ":") else 1
+            continue
+
+        if ch in ("S", "C") and pos + 1 < n:
+            delim = mods_str[pos + 1]
+            p_idx = pos + 2
+
+            def _read_part(start: int) -> Tuple[str, int]:
+                buf: List[str] = []
+                k = start
+                while k < n:
+                    if mods_str[k] == "\\" and k + 1 < n and mods_str[k + 1] == delim:
+                        buf.append(delim)
+                        k += 2
+                        continue
+                    if mods_str[k] == delim:
+                        return "".join(buf), k + 1
+                    buf.append(mods_str[k])
+                    k += 1
+                return "".join(buf), k
+
+            pat_raw, after_pat = _read_part(p_idx)
+            rep_raw, after_rep = _read_part(after_pat)
+            flags = ""
+            k = after_rep
+            while k < n and mods_str[k] != ":":
+                flags += mods_str[k]
+                k += 1
+            pos = k + 1 if (k < n and mods_str[k] == ":") else k
+
+            cnt = 0 if "g" in flags else 1
+            if ch == "S":
+                anc_s = pat_raw.startswith("^")
+                anc_e = pat_raw.endswith("$")
+                core = pat_raw[1 if anc_s else 0 : len(pat_raw) - (1 if anc_e and len(pat_raw) > (1 if anc_s else 0) else 0)]
+                rx = ("^" if anc_s else "") + re.escape(core) + ("$" if anc_e else "")
+                words = [cur] if "W" in flags else cur.split()
+                new_words = [
+                    re.sub(rx, lambda m, r=rep_raw: r.replace("&", m.group(0)), w, count=cnt)
+                    for w in words
+                ]
+                cur = new_words[0] if "W" in flags else (" ".join(new_words) if cur.strip() else cur)
+            else:
+                def _crepl(m: re.Match, r: str = rep_raw) -> str:
+                    out_c: List[str] = []
+                    j = 0
+                    while j < len(r):
+                        if r[j] == "&":
+                            out_c.append(m.group(0))
+                            j += 1
+                        elif r[j] == "\\" and j + 1 < len(r) and r[j + 1].isdigit():
+                            grp = int(r[j + 1])
+                            out_c.append(m.group(grp) if grp <= (m.lastindex or 0) and m.group(grp) is not None else "")
+                            j += 2
+                        else:
+                            out_c.append(r[j])
+                            j += 1
+                    return "".join(out_c)
+
+                words = [cur] if "W" in flags else cur.split()
+                new_words = [re.sub(pat_raw, _crepl, w, count=cnt) for w in words]
+                cur = new_words[0] if "W" in flags else (" ".join(new_words) if cur.strip() else cur)
+            continue
+
+        # Unknown modifier: skip to next ':' safely
+        nxt = mods_str.find(":", pos)
+        pos = nxt + 1 if nxt != -1 else n
+    return cur
+
+
 def expand_openbsd_expr(expr: str, env: Dict[str, str], depth: int = 0) -> str:
     if depth > 8 or "$" not in expr:
         return expr
 
-    def repl(m: re.Match) -> str:
-        name = m.group(1) or m.group(4) or m.group(5) or ""
-        suffix_append = m.group(2)
-        mod = m.group(3)
-        base_val = expand_openbsd_expr(env.get(name, ""), env, depth + 1)
-        if mod == "R":
-            return base_val.rsplit(".", 1)[0] if "." in base_val else base_val
-        if mod == "L":
-            return base_val.lower()
-        if suffix_append is not None:
-            sub = expand_openbsd_expr(suffix_append, env, depth + 1)
-            toks = base_val.split()
-            return " ".join(t + sub for t in toks)
-        return base_val
+    out = SIMPLE_PAREN_OR_CHAR_VAR_RE.sub(
+        lambda m: expand_openbsd_expr(env.get(m.group(1) or m.group(2) or "", ""), env, depth + 1),
+        expr,
+    )
+    for _ in range(8):
+        if "${" not in out:
+            break
 
-    return SIMPLE_VAR_RE.sub(repl, expr)
+        def _repl_braced(m: re.Match) -> str:
+            body = m.group(1)
+            if ":" in body:
+                name, mods = body.split(":", 1)
+                base_val = expand_openbsd_expr(env.get(name, ""), env, depth + 1)
+                return _apply_bmake_modifiers(base_val, mods)
+            return expand_openbsd_expr(env.get(body, ""), env, depth + 1)
+
+        nxt = BRACED_VAR_RE.sub(_repl_braced, out)
+        if nxt == out:
+            break
+        out = nxt
+    return out
 
 
 def resolve_distfile_urls(
@@ -303,6 +395,26 @@ def resolve_distfile_urls(
                 sites_raw.append(f"https://github.com/{acct}/{proj}/archive/{ref}/")
                 sites_raw.append(f"https://github.com/{acct}/{proj}/releases/download/{ref}/")
 
+    if expand_openbsd_expr(env.get("MODPY_PI", ""), env).strip().lower() == "yes":
+        distname_val = expand_openbsd_expr(env.get("DISTNAME", ""), env).strip()
+        modpy_distv = expand_openbsd_expr(env.get("MODPY_DISTV", env.get("MODPY_EGG_VERSION", "")), env).strip()
+        if modpy_distv and distname_val.endswith(f"-{modpy_distv}"):
+            egg_name = distname_val[: -len(f"-{modpy_distv}")]
+        elif "-" in distname_val:
+            egg_name = distname_val.rsplit("-", 1)[0]
+        else:
+            egg_name = distname_val
+        pi_dir = expand_openbsd_expr(env.get("MODPY_PI_DIR", ""), env).strip().strip("/")
+        if not pi_dir and egg_name:
+            pi_dir = f"{egg_name[0]}/{egg_name}"
+        if pi_dir:
+            pypi_bases = expand_openbsd_expr(
+                env.get("SITE_PYPI", "https://files.pythonhosted.org/packages/source/"),
+                env,
+            ).split()
+            for pb in pypi_bases:
+                sites_raw.append(f"{pb.rstrip('/')}/{pi_dir}/")
+
     # Always include official OpenBSD distfile mirrors as reliable fallback
     sites_raw.extend(
         [
@@ -345,7 +457,11 @@ def resolve_distfile_urls(
     return urls
 
 
-def load_recipe(port_dir: pathlib.Path, openbsd_version: str) -> Dict[str, Any]:
+def load_recipe(
+    port_dir: pathlib.Path,
+    openbsd_version: str,
+    ports_root: Optional[pathlib.Path] = None,
+) -> Dict[str, Any]:
     toml_path = port_dir / "port.toml"
     json_path = port_dir / "port.json"
     if toml_path.is_file():
@@ -355,7 +471,8 @@ def load_recipe(port_dir: pathlib.Path, openbsd_version: str) -> Dict[str, Any]:
     else:
         die(f"missing port.toml or port.json in {port_dir}")
 
-    rel_port = port_dir.relative_to(REPO_ROOT / "ports").as_posix()
+    base_ports_root = ports_root or (REPO_ROOT / "ports")
+    rel_port = port_dir.relative_to(base_ports_root).as_posix()
     recipe = dict(raw)
     ver_overrides = recipe.pop("versions", {}).get(openbsd_version, {})
     if isinstance(ver_overrides, dict):
@@ -365,43 +482,68 @@ def load_recipe(port_dir: pathlib.Path, openbsd_version: str) -> Dict[str, Any]:
     recipe["port"] = recipe.get("port", rel_port)
     recipe["vendor_port"] = recipe.get("vendor_port", recipe["port"])
     recipe["port_dir"] = port_dir
+    if "only_versions" in recipe and recipe["only_versions"] is not None:
+        recipe["only_versions"] = [str(v).strip() for v in recipe["only_versions"]]
     recipe.setdefault("depends", [])
     recipe.setdefault("build_style", "gnu")
     recipe.setdefault("separate_build", False)
     recipe.setdefault("use_gmake", True)
     recipe.setdefault("apply_vendor_patches", True)
     recipe.setdefault("skip_vendor_patches", [])
+    recipe.setdefault("skip_distfiles", [])
     recipe.setdefault("patch_strip", 0)
     recipe.setdefault("applets", [])
     return recipe
 
 
-def discover_recipes(openbsd_version: str, target_ports: Optional[Sequence[str]] = None) -> List[Dict[str, Any]]:
-    ports_root = REPO_ROOT / "ports"
+def recipe_supports_version(recipe: Dict[str, Any], openbsd_version: str) -> bool:
+    only_versions = recipe.get("only_versions")
+    if only_versions is not None:
+        return openbsd_version in [str(v).strip() for v in only_versions]
+    return True
+
+
+def discover_recipes(
+    openbsd_version: str,
+    target_ports: Optional[Sequence[str]] = None,
+    ports_root: Optional[pathlib.Path] = None,
+) -> List[Dict[str, Any]]:
+    ports_root = ports_root or (REPO_ROOT / "ports")
     if not ports_root.is_dir():
         return []
 
+    raw_map: Dict[str, Dict[str, Any]] = {}
     all_map: Dict[str, Dict[str, Any]] = {}
     for p in sorted(ports_root.rglob("port.toml")) + sorted(ports_root.rglob("port.json")):
         port_dir = p.parent
         rel = port_dir.relative_to(ports_root).as_posix()
-        if rel not in all_map:
-            all_map[rel] = load_recipe(port_dir, openbsd_version)
+        if rel not in raw_map:
+            rec = load_recipe(port_dir, openbsd_version, ports_root=ports_root)
+            raw_map[rel] = rec
+            if recipe_supports_version(rec, openbsd_version):
+                all_map[rel] = rec
 
     if target_ports:
         wanted: Set[str] = set()
 
-        def add_with_deps(name: str) -> None:
+        def add_with_deps(name: str, required_by: Optional[str] = None) -> None:
             norm = name.strip().strip("/")
             if norm.startswith("ports/"):
                 norm = norm[len("ports/") :]
+            if norm not in raw_map:
+                die(f"port recipe '{norm}' not found under ports/ (available: {', '.join(sorted(raw_map)) or 'none'})")
             if norm not in all_map:
-                die(f"port recipe '{norm}' not found under ports/ (available: {', '.join(sorted(all_map)) or 'none'})")
+                if required_by is not None:
+                    die(
+                        f"port '{required_by}' depends on '{norm}', which is restricted to "
+                        f"only_versions={raw_map[norm].get('only_versions')} (current: {openbsd_version})"
+                    )
+                return
             if norm in wanted:
                 return
             wanted.add(norm)
             for dep in all_map[norm].get("depends", []):
-                add_with_deps(dep)
+                add_with_deps(dep, required_by=norm)
 
         for tp in target_ports:
             for item in tp.split(","):
@@ -423,6 +565,11 @@ def discover_recipes(openbsd_version: str, target_ports: Optional[Sequence[str]]
         visiting.add(name)
         rec = all_map.get(name)
         if rec is None:
+            if name in raw_map:
+                die(
+                    f"dependency port '{name}' is restricted to "
+                    f"only_versions={raw_map[name].get('only_versions')} (current: {openbsd_version})"
+                )
             die(f"missing dependency port recipe 'ports/{name}/port.toml'")
         for dep in rec.get("depends", []):
             visit(dep)
@@ -435,8 +582,20 @@ def discover_recipes(openbsd_version: str, target_ports: Optional[Sequence[str]]
     return ordered
 
 
-def fetch_port_distfiles(recipe: Dict[str, Any], openbsd_version: str) -> List[Tuple[pathlib.Path, Dict[str, Any]]]:
-    vendor_ports_dir = REPO_ROOT / "vendor/openbsd/versions" / openbsd_version / "ports"
+def is_skipped_distfile(filename: str, skip_set: Set[str]) -> bool:
+    if not skip_set:
+        return False
+    leaf = filename.rsplit("/", 1)[-1]
+    return filename in skip_set or leaf in skip_set
+
+
+def fetch_port_distfiles(
+    recipe: Dict[str, Any],
+    openbsd_version: str,
+    repo_root: Optional[pathlib.Path] = None,
+) -> List[Tuple[pathlib.Path, Dict[str, Any]]]:
+    root = repo_root or REPO_ROOT
+    vendor_ports_dir = root / "vendor/openbsd/versions" / openbsd_version / "ports"
     vport = recipe["vendor_port"]
     vdir = vendor_ports_dir / vport
     if not vdir.is_dir():
@@ -446,12 +605,15 @@ def fetch_port_distfiles(recipe: Dict[str, Any], openbsd_version: str) -> List[T
         )
 
     entries = parse_distinfo(vdir / "distinfo")
-    cache_dist = REPO_ROOT / ".cache/distfiles"
+    skip_set = {str(x) for x in recipe.get("skip_distfiles", [])}
+    cache_dist = root / ".cache/distfiles"
     extra_sites = recipe.get("sites", [])
     fetched: List[Tuple[pathlib.Path, Dict[str, Any]]] = []
 
     for ent in entries:
         fn = ent["filename"]
+        if is_skipped_distfile(fn, skip_set):
+            continue
         expected_sha = ent["sha256"]
         expected_sz = ent["size"]
         dest = cache_dist / fn
@@ -747,9 +909,10 @@ def get_port_pkgname(vendor_ports_dir: pathlib.Path, vendor_port: str) -> str:
     mk_paths.append(vendor_ports_dir / vendor_port / "Makefile")
     env = parse_openbsd_makefile_vars(mk_paths)
     distname = expand_openbsd_expr(env.get("DISTNAME", ""), env).strip()
-    pkgname = expand_openbsd_expr(env.get("PKGNAME", distname or parts[-1]), env).strip()
-    if not pkgname:
-        pkgname = parts[-1]
+    raw_pkg = env.get("PKGNAME", env.get("PKGNAME-main", distname or parts[-1]))
+    pkgname = expand_openbsd_expr(raw_pkg, env).strip()
+    if not pkgname or "$" in pkgname or "/" in pkgname:
+        pkgname = distname if (distname and "$" not in distname and "/" not in distname) else parts[-1]
     return pkgname
 
 
@@ -882,10 +1045,12 @@ def build_single_port(
     lane_dir: pathlib.Path,
     jobs: int,
     force: bool = False,
+    repo_root: Optional[pathlib.Path] = None,
 ) -> Dict[str, Any]:
+    root = repo_root or REPO_ROOT
     port_name = recipe["port"]
     vport = recipe["vendor_port"]
-    vendor_ports_dir = REPO_ROOT / "vendor/openbsd/versions" / openbsd_version / "ports"
+    vendor_ports_dir = root / "vendor/openbsd/versions" / openbsd_version / "ports"
     vendor_port_dir = vendor_ports_dir / vport
     pkgname = recipe.get("pkgname") or get_port_pkgname(vendor_ports_dir, vport)
 
@@ -899,7 +1064,7 @@ def build_single_port(
     stamp_slug = port_name.replace("/", "__")
     stamp_file = stamps_dir / f"{stamp_slug}.json"
 
-    fetched = fetch_port_distfiles(recipe, openbsd_version)
+    fetched = fetch_port_distfiles(recipe, openbsd_version, repo_root=root)
 
     # Compute deterministic recipe + vendor + distfile build signature
     # (exclude absolute `port_dir` Path so `.stamps/*.json` remain portable across checkouts/submodules)
@@ -939,10 +1104,13 @@ def build_single_port(
     vendor_env = parse_openbsd_makefile_vars(mk_paths)
     dist_patch_map, _default_dist_strip = parse_vendor_patchfiles(vendor_env, recipe)
 
+    skip_dist_set = {str(x) for x in recipe.get("skip_distfiles", [])}
     extract_only = set(recipe.get("extract_only", []))
     dist_patches_to_apply: List[Tuple[pathlib.Path, str, int]] = []
     for df_path, ent in fetched:
         fn = ent["filename"]
+        if is_skipped_distfile(fn, skip_dist_set) or df_path.name in skip_dist_set:
+            continue
         if fn in dist_patch_map or df_path.name in dist_patch_map:
             st_lvl = dist_patch_map.get(fn, dist_patch_map.get(df_path.name, 0))
             dist_patches_to_apply.append((df_path, fn, st_lvl))

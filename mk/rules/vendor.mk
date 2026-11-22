@@ -5,7 +5,7 @@ sync-vendor:
 
 import:
 	@test -n "$(PORT)" || { echo "usage: make import PORT=<category>/<name> [OPENBSD_VERSION=7.8|7.9|8.0|all]" >&2; exit 2; }
-	"$(PYTHON)" -I "$(TOOLS_ROOT)/vendor/import_port.py" --version all $(PORT)
+	"$(PYTHON)" -I "$(TOOLS_ROOT)/vendor/import_port.py" --version "$(if $(filter command line environment,$(origin OPENBSD_VERSION)),$(OPENBSD_VERSION),all)" $(PORT)
 
 list-catalog:
 	@"$(PYTHON)" -I "$(TOOLS_ROOT)/build_ports.py" list-catalog \
