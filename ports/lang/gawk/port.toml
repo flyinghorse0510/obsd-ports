@@ -20,7 +20,6 @@ post_install = [
 
 [env]
 ac_cv_path_XGETTEXT = ":"
-gl_cv_host_cpu_c_abi = "wasm64"
 
 [[applets]]
 sym = "gawk"

@@ -2,12 +2,14 @@
 """
 run_check.py -- Top-level `make check` driver for `obsd-ports`.
 
-1. Verifies the Guest Cross-Compilation SDK (`obsd-cc`, `obsd-pkg-config`,
-   symbol closure checking, and `wasm_object_tool.py localize-applet`) on the
-   selected `OPENBSD_VERSION`.
-2. When `tests/run_wasm_ports_tests.py` is present (owned by `@ports-pack`),
-   executes the full WASM64 port test suite for `OPENBSD_VERSION` with hermetic
-   `NODE`, `LIBOBSDCOMPAT_ROOT`, `OBSD_PORTS_ROOT`, and `OBSD_LANE_DIR` wired.
+Supports both:
+  - `COMPAT_PAL=emscripten` (`emulate`): WASM64 SDK smoke check, `tests/test_sdk.py`,
+    `tests/run_wasm_ports_tests.py`, and Wave-2/Wave-3 WASM64 port suites.
+  - `COMPAT_PAL=darwin` (`translate` for `macosx`, `emulate` for `iphonesimulator`
+    & `iphoneos`): Darwin SDK smoke check (`obsd-cc`, `obsd-c++`, `obsd-pkg-config`)
+    and `tests/run_darwin_ports_tests.py` (Mach-O/ABI/`x18`/App-Store-policy audit,
+    static-library C/C++17 link checks, `emulate` table co-generation check, and
+    live OpenBSD VFS execution across all 53 ports on `translate/darwin-macosx`).
 """
 from __future__ import annotations
 
@@ -18,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from typing import Optional
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "tools/config"))
@@ -35,14 +38,26 @@ def find_node_dir(obsd_root: pathlib.Path) -> Optional[pathlib.Path]:
     return None
 
 
-def verify_sdk_smoke(openbsd_version: str, obsd_root: pathlib.Path) -> None:
+def resolve_sdk(pal: str, backend: str, cli_sdk: str) -> str:
+    if pal != "darwin":
+        return ""
+    sdk = (cli_sdk or os.environ.get("COMPAT_SDK", "")).strip()
+    if not sdk:
+        sdk = "macosx" if backend == "translate" else "iphonesimulator"
+    return sdk
+
+
+def verify_emscripten_sdk_smoke(openbsd_version: str, obsd_root: pathlib.Path) -> None:
     obsd_cc = REPO_ROOT / "sdk/bin/obsd-cc"
     obsd_pc = REPO_ROOT / "sdk/bin/obsd-pkg-config"
     wasm_obj_tool = obsd_root / "tools/build/personalities/openbsd/backends/emulate/wasm_object_tool.py"
 
     env = dict(os.environ)
     env["OPENBSD_VERSION"] = openbsd_version
+    env["COMPAT_BACKEND"] = "emulate"
+    env["COMPAT_PAL"] = "emscripten"
     env["LIBOBSDCOMPAT_ROOT"] = str(obsd_root)
+    env["OBSD_PYTHON"] = sys.executable
 
     with tempfile.TemporaryDirectory(prefix="obsd-sdk-check-") as td:
         tp = pathlib.Path(td)
@@ -91,7 +106,72 @@ def verify_sdk_smoke(openbsd_version: str, obsd_root: pathlib.Path) -> None:
             check=True,
         )
         subprocess.run([str(obsd_pc), "--libs", "openssl", "zlib", "ncursesw"], env=env, check=True, stdout=subprocess.DEVNULL)
-    print(f"[check/{openbsd_version}] SDK cross-compiler & applet localization check: OK")
+    print(f"[check/{openbsd_version}/emulate/emscripten] SDK cross-compiler & applet localization check: OK")
+
+
+def verify_darwin_sdk_smoke(openbsd_version: str, backend: str, sdk: str, obsd_root: pathlib.Path) -> None:
+    obsd_cc = REPO_ROOT / "sdk/bin/obsd-cc"
+    obsd_cxx = REPO_ROOT / "sdk/bin/obsd-c++"
+    obsd_pc = REPO_ROOT / "sdk/bin/obsd-pkg-config"
+
+    env = dict(os.environ)
+    env["OPENBSD_VERSION"] = openbsd_version
+    env["COMPAT_BACKEND"] = backend
+    env["COMPAT_PAL"] = "darwin"
+    env["COMPAT_SDK"] = sdk
+    env["LIBOBSDCOMPAT_ROOT"] = str(obsd_root)
+    env["OBSD_PYTHON"] = sys.executable
+
+    with tempfile.TemporaryDirectory(prefix=f"obsd-darwin-sdk-check-{sdk}-") as td:
+        tp = pathlib.Path(td)
+        probe_c = tp / "probe.c"
+        probe_o = tp / "probe_c"
+        probe_c.write_text(
+            "#include <sys/param.h>\n"
+            "#include <stdio.h>\n"
+            "#include <stdlib.h>\n"
+            "#include <zlib.h>\n"
+            "#include <curses.h>\n"
+            "#include <openssl/ssl.h>\n"
+            "int main(int argc, char **argv) {\n"
+            "  (void)argv;\n"
+            "  SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());\n"
+            "  return (ctx != NULL && zlibVersion() != NULL) ? (argc - 1) : 1;\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            [str(obsd_cc), str(probe_c), "-lssl", "-lcrypto", "-lz", "-lcurses", "-o", str(probe_o)],
+            env=env,
+            check=True,
+        )
+        if backend == "translate":
+            rc = subprocess.run([str(probe_o)]).returncode
+            if rc != 0:
+                raise AssertionError(f"Darwin translate C SDK probe exited with {rc}")
+
+        probe_cpp = tp / "probe.cpp"
+        probe_cxx_o = tp / "probe_cxx"
+        probe_cpp.write_text(
+            "#include <stdexcept>\n"
+            "#include <string>\n"
+            "#include <vector>\n"
+            "static thread_local int tls_v = 41;\n"
+            "int main(void) {\n"
+            "  try { throw std::runtime_error(\"ok\"); }\n"
+            "  catch (const std::exception &e) { return (++tls_v == 42 && e.what()[0] == 'o') ? 0 : 2; }\n"
+            "  return 1;\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        subprocess.run([str(obsd_cxx), "-std=c++17", "-O2", str(probe_cpp), "-o", str(probe_cxx_o)], env=env, check=True)
+        if backend == "translate":
+            rc2 = subprocess.run([str(probe_cxx_o)]).returncode
+            if rc2 != 0:
+                raise AssertionError(f"Darwin translate C++17 SDK probe exited with {rc2}")
+
+        subprocess.run([str(obsd_pc), "--libs", "openssl", "zlib", "ncursesw"], env=env, check=True, stdout=subprocess.DEVNULL)
+    print(f"[check/{openbsd_version}/{backend}/darwin-{sdk}] Darwin C & C++17 SDK cross-compiler check: OK")
 
 
 def main() -> int:
@@ -99,15 +179,15 @@ def main() -> int:
     ap.add_argument("--openbsd-version", default=obsd_versions.env_or_default_version())
     ap.add_argument("--backend", default="emulate")
     ap.add_argument("--pal", default="emscripten")
+    ap.add_argument("--sdk", default="")
     ap.add_argument("--libobsdcompat-root", required=True)
     ap.add_argument("--port", default="")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 8)
     args = ap.parse_args()
     obsd_versions.require_verified(args.openbsd_version)
-    obsd_env.ensure_emsdk_python(args.libobsdcompat_root)
 
     obsd_root = pathlib.Path(args.libobsdcompat_root).resolve()
-    lane_dir = REPO_ROOT / "build/openbsd" / args.openbsd_version / args.backend / args.pal
+    sdk = resolve_sdk(args.pal, args.backend, args.sdk)
 
     rc_axis = subprocess.run(
         [sys.executable, "-I", str(REPO_ROOT / "tests/test_release_axis.py"), "--libobsdcompat-root", str(obsd_root)],
@@ -116,7 +196,32 @@ def main() -> int:
     if rc_axis != 0:
         return rc_axis
 
-    verify_sdk_smoke(args.openbsd_version, obsd_root)
+    if args.pal == "darwin":
+        verify_darwin_sdk_smoke(args.openbsd_version, args.backend, sdk, obsd_root)
+        darwin_suite = REPO_ROOT / "tests/run_darwin_ports_tests.py"
+        cmd = [
+            sys.executable,
+            "-I",
+            str(darwin_suite),
+            "--openbsd-version",
+            args.openbsd_version,
+            "--backend",
+            args.backend,
+            "--sdk",
+            sdk,
+            "--libobsdcompat-root",
+            str(obsd_root),
+            "--jobs",
+            str(args.jobs),
+        ]
+        if args.port:
+            cmd.extend(["--port", args.port])
+        return subprocess.run(cmd, cwd=str(REPO_ROOT)).returncode
+
+    obsd_env.ensure_emsdk_python(args.libobsdcompat_root)
+    lane_dir = REPO_ROOT / "build/openbsd" / args.openbsd_version / args.backend / args.pal
+
+    verify_emscripten_sdk_smoke(args.openbsd_version, obsd_root)
 
     test_sdk_py = REPO_ROOT / "tests/test_sdk.py"
     if test_sdk_py.is_file():
@@ -147,6 +252,7 @@ def main() -> int:
     env["COMPAT_BACKEND"] = args.backend
     env["COMPAT_PAL"] = args.pal
     env["OBSD_LANE_DIR"] = str(lane_dir)
+    env["OBSD_PYTHON"] = sys.executable
 
     path_parts = [str(REPO_ROOT / "sdk/bin")]
     node_dir = find_node_dir(obsd_root)
@@ -156,8 +262,6 @@ def main() -> int:
     path_parts.append(env.get("PATH", "/usr/bin:/bin"))
     env["PATH"] = ":".join(path_parts)
 
-    # Inspect supported CLI arguments of `tests/run_wasm_ports_tests.py` so both
-    # `--openbsd-version` and `--version` / `--release` conventions work seamlessly.
     help_proc = subprocess.run(
         [sys.executable, "-I", str(suite_py), "--help"],
         env=env,

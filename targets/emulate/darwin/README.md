@@ -1,5 +1,5 @@
-# `targets/emulate/darwin/` — Target Seam
+# `targets/emulate/darwin/` — iOS & Simulator `emulate` Target Adapter
 
-Target adapter seam for `COMPAT_BACKEND=emulate COMPAT_PAL=darwin` (Darwin arm64 iPhoneOS / iPhoneSimulator crunched Mach-O multi-call emulate lane). Not implemented yet: `package_darwin.py` exits 2.
+Target packaging adapter for `COMPAT_BACKEND=emulate COMPAT_PAL=darwin COMPAT_SDK=iphonesimulator|iphoneos` (`build/openbsd/<ver>/emulate/darwin-<sdk>/`).
 
-When implemented it localizes Mach-O `.o` closures with `llvm-objcopy --redefine-sym` against libobsdcompat's darwin emulate `include-root`, and emits `applets/<sym>.o`, `ports-applets.tsv` and `sysroot/usr/local` for the sonvori-terminal iOS/iPadOS app (`apps/ios`), which ingests them through `scripts/stage-rootfs.py` and `scripts/package-runtime.sh`.
+`package_darwin.py` localizes arm64 Mach-O relocatable port partials into `applets/<sym>.o` (`_obsd_applet_<sym>_main` sole external symbol, zero `(common)` tentative symbols, zero Mach-O `__thread_*` TLV sections, zero `__TEXT,__gcc_except_tab` sections, and zero `__DATA,__mod_init_func` sections via `libobsdcompat`'s `retype_guest_initializers.py`), and emits `ports-test-applets.tsv`, `ports-applets.tsv`, `sysroot/usr/local`, `ports-owners.db`, and `packages/*.tgz` for `sonvori-terminal`'s `scripts/package-runtime.sh` and `scripts/stage-rootfs.py`.

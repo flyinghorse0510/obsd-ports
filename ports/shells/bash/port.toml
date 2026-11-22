@@ -12,6 +12,7 @@ configure_args = [
     "--sysconfdir=/etc",
     "--mandir=/usr/local/man",
     "--without-bash-malloc",
+    "--disable-loadable-builtins",
     "--disable-nls",
     "--with-curses",
     "--with-libiconv-prefix=/usr/local",
@@ -27,6 +28,12 @@ post_install = [
 
 [env]
 LIBS_FOR_BUILD = ""
+ac_cv_func_dlopen = "no"
+ac_cv_func_dlclose = "no"
+ac_cv_func_dlsym = "no"
+ac_cv_func_dlerror = "no"
+ac_cv_lib_dl_dlopen = "no"
+ac_cv_header_dlfcn_h = "no"
 bash_cv_dev_fd = "absent"
 bash_cv_dev_stdin = "absent"
 bash_cv_getcwd_malloc = "yes"

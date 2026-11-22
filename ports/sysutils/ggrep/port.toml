@@ -18,7 +18,6 @@ post_install = [
 [env]
 POSIX_SHELL = "/bin/sh"
 ac_cv_libsigsegv = "no"
-gl_cv_host_cpu_c_abi = "wasm64"
 
 [[applets]]
 sym = "ggrep"

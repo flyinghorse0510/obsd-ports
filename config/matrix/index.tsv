@@ -2,6 +2,6 @@
 backend	pal	status	guest_arch	binary_format	adapter_dir	notes
 emulate	emscripten	active	wasm64	wasm64-reloc-applet	targets/emulate/emscripten	WASM64 multi-process emulate guest (Browser & Node.js).
 emulate	wasi	seam	wasm64	wasm64-reloc-applet	targets/emulate/wasi	WASI preview2 headless WASM64 emulate target seam.
-emulate	darwin	seam	arm64	macho64-reloc-applet	targets/emulate/darwin	Darwin arm64/ios-simulator crunched emulate target seam.
-translate	darwin	seam	arm64	macho64-exec	targets/translate/darwin	macOS/iOS native Mach-O translate boundary target seam.
+emulate	darwin	active	arm64	macho64-reloc-applet	targets/emulate/darwin	Darwin arm64/ios-simulator crunched emulate target lane.
+translate	darwin	active	arm64	macho64-exec	targets/translate/darwin	macOS arm64 native Mach-O translate boundary target lane.
 translate	linux	seam	aarch64	elf64-exec	targets/translate/linux	Linux ELF64 translate boundary target seam.

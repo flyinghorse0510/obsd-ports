@@ -1,6 +1,27 @@
 --- entr.c.orig
 +++ entr.c
-@@ -353,6 +353,8 @@
+@@ -148,10 +148,16 @@
+ #else /* BSD */
+ 	if (getrlimit(RLIMIT_NOFILE, &rl) == -1)
+ 		err(1, "getrlimit");
+-	open_max = (unsigned) rl.rlim_max;
+-	rl.rlim_cur = (rlim_t) open_max;
+-	if (setrlimit(RLIMIT_NOFILE, &rl) != 0)
+-		err(1, "setrlimit cannot set rlim_cur to %u", open_max);
++	if (rl.rlim_max == RLIM_INFINITY || rl.rlim_max > 4096)
++		open_max = 4096;
++	else
++		open_max = (unsigned) rl.rlim_max;
++	if (rl.rlim_cur < (rlim_t) open_max) {
++		rlim_t prev_cur = rl.rlim_cur;
++		rl.rlim_cur = (rlim_t) open_max;
++		if (setrlimit(RLIMIT_NOFILE, &rl) != 0)
++			open_max = (unsigned) prev_cur;
++	}
+ #endif
+ 
+ 	if (getenv("EV_TRACE"))
+@@ -353,6 +359,8 @@
  			files[n_files]->file_count = 0;
  			files[n_files]->mode = sb.st_mode;
  			files[n_files]->ino = sb.st_ino;
@@ -23,7 +44,28 @@
  				n_files++;
  			}
  		}
-@@ -571,6 +580,14 @@
+@@ -531,11 +546,18 @@
+ 	}
+ 	child_pid = pid;
+ 
+-	if (restart_opt == 0 && oneshot_opt == 0) {
+-		if (waitpid(child_pid, &status, 0) != -1)
++	if (restart_opt == 0) {
++		while (waitpid(child_pid, &status, 0) == -1 && errno == EINTR)
++			;
++		if (errno != ECHILD)
+ 			child_status = status;
+ 
+ 		print_child_status(child_status);
++		if (oneshot_opt == 1) {
++			if (WIFSIGNALED(child_status))
++				_exit(128 + WTERMSIG(child_status));
++			_exit(WEXITSTATUS(child_status));
++		}
+ 	}
+ 
+ 	free(arg_buf);
+@@ -571,6 +593,14 @@
  		i++;
  	}
  
@@ -38,14 +80,17 @@
  	EV_SET(&evSet, file->fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_ALL, 0, file);
  	if (kevent(kq, &evSet, 1, NULL, 0, NULL) == -1) {
  		if (errno == ENOSPC)
-@@ -649,8 +666,46 @@
+@@ -649,8 +666,51 @@
  	if ((reopen_only == 1) || (collate_only == 1)) {
  		nev = kevent(kq, NULL, 0, evList, 32, &evTimeout);
  	} else {
--		nev = kevent(kq, NULL, 0, evList, 32, NULL);
++#if !defined(LIBOBSDCOMPAT_OBJECT_FORMAT_WASM)
+ 		nev = kevent(kq, NULL, 0, evList, 32, NULL);
+ 		dir_modified = 0;
++#else
 +		struct timespec pollTimeout = { 0, 100 * 1000000 };
 +		nev = kevent(kq, NULL, 0, evList, 32, &pollTimeout);
- 		dir_modified = 0;
++		dir_modified = 0;
 +		if (oneshot_opt == 1 && child_pid > 0)
 +			proc_exit(SIGCHLD);
 +		if (nev == 0) {
@@ -83,6 +128,7 @@
 +				}
 +			}
 +		}
++#endif
  	}
  
  	if ((nev == -1) && (errno != EINTR))

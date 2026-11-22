@@ -10,9 +10,6 @@ configure_args = [
     "--without-selinux",
 ]
 
-[env]
-gl_cv_host_cpu_c_abi = "wasm64"
-
 [[applets]]
 sym = "gsed"
 binary = "/usr/local/bin/gsed"

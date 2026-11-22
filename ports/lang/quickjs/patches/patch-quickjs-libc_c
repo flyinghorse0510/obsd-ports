@@ -1,0 +1,11 @@
+--- quickjs-libc.c.orig
++++ quickjs-libc.c
+@@ -453,7 +453,7 @@ typedef JSModuleDef *(JSInitModuleFunc)(JSContext *ctx,
+                                         const char *module_name);
+ 
+ 
+-#if defined(_WIN32)
++#if defined(_WIN32) || defined(__OpenBSD__) || defined(CONFIG_NO_DLOPEN)
+ static JSModuleDef *js_module_loader_so(JSContext *ctx,
+                                         const char *module_name)
+ {

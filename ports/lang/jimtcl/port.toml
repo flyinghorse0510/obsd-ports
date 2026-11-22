@@ -21,6 +21,8 @@ post_configure = [
 
 [env]
 ac_cv_func_backtrace = "no"
+ac_cv_func_dlopen = "no"
+ac_cv_lib_dl_dlopen = "no"
 
 [versions."7.8"]
 configure_args = [
@@ -30,6 +32,7 @@ configure_args = [
     "--includedir=/usr/local/include/jim",
     "--disable-docs",
     "--full",
+    "--without-ext=load",
     "--with-ext=sqlite3,zlib",
     "CCACHE=none",
 ]
@@ -43,6 +46,7 @@ configure_args = [
     "--disable-docs",
     "--full",
     "--compat",
+    "--without-ext=load",
     "--with-ext=sqlite3,zlib",
     "CCACHE=none",
 ]
@@ -56,6 +60,7 @@ configure_args = [
     "--disable-docs",
     "--full",
     "--compat",
+    "--without-ext=load",
     "--with-ext=sqlite3,zlib",
     "CCACHE=none",
 ]

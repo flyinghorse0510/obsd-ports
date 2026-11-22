@@ -7,7 +7,7 @@ make_args = [
     "CC=obsd-cc",
     "AR=obsd-ar",
     "RANLIB=obsd-ranlib",
-    "CFLAGS=-O2 -Wall -Winline -fomit-frame-pointer -D_FILE_OFFSET_BITS=64",
+    "CFLAGS=-O2 -Wall -Winline -D_FILE_OFFSET_BITS=64",
     "SHLIB=",
 ]
 

@@ -8,6 +8,7 @@ separate_build = true
 use_gmake = true
 
 configure_args = [
+    "--without-modules",
     "--without-python",
     "--without-readline",
     "--without-history",

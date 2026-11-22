@@ -57,14 +57,19 @@ required_files=(
 	sdk/bin/obsd-strip
 	sdk/bin/obsd-pkg-config
 	sdk/autoconf/config.site
+	sdk/autoconf/config.site.darwin
 	sdk/cmake/openbsd-wasm64.cmake
+	sdk/cmake/openbsd-darwin.cmake
 	tools/build_ports.py
 	tools/config/obsd_versions.py
 	sdk/lib/obsd-python.sh
 	tools/vendor/sync_openbsd_ports.py
 	tools/vendor/import_port.py
 	tools/audit/vendor-baseline.tsv
+	targets/common/packaging.py
 	targets/emulate/emscripten/package_wasm.py
+	targets/emulate/darwin/package_darwin.py
+	targets/translate/darwin/package_darwin.py
 )
 
 while IFS= read -r rel; do
