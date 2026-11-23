@@ -1,0 +1,86 @@
+port = "audio/whisper.cpp"
+depends = ["devel/libggml"]
+build_style = "cmake"
+separate_build = true
+skip_distfiles = ["ggml-base.en.bin"]
+
+cflags = ["-msimd128"]
+cxxflags = ["-msimd128", "-U__cpp_lib_hardware_interference_size", "-include", "cerrno", "-include", "cstdlib", "-include", "algorithm"]
+
+pre_configure = [
+    "python3 -I \"$PORT_DIR/prepare_wasm.py\"",
+]
+
+cmake_args = [
+    "-DCMAKE_SYSTEM_PROCESSOR=wasm64",
+    "-DBUILD_SHARED_LIBS=OFF",
+    "-DWHISPER_USE_SYSTEM_GGML=ON",
+    "-DWHISPER_BUILD_TESTS=OFF",
+    "-DWHISPER_BUILD_EXAMPLES=ON",
+    "-DWHISPER_BUILD_SERVER=ON",
+    "-DWHISPER_FFMPEG=OFF",
+    "-DWHISPER_COMMON_FFMPEG=OFF",
+    "-DWHISPER_SDL2=OFF",
+    "-DWHISPER_CURL=OFF",
+]
+
+post_install = [
+    "python3 -I \"$PORT_DIR/prepare_wasm.py\" --post-install",
+]
+
+[[applets]]
+sym = "whisper"
+binary = "/usr/local/bin/whisper"
+paths = [
+    "/usr/local/bin/whisper",
+    "/usr/local/bin/whisper-cli",
+    "/usr/local/bin/whisper-server",
+    "/usr/local/bin/whisper-bench",
+    "/usr/local/bin/whisper-quantize",
+]
+
+[versions."7.8"]
+extract_only = ["whisper.cpp-1.7.6.tar.gz"]
+
+[versions."7.9"]
+extract_only = ["whisper.cpp-1.8.4.tar.gz"]
+
+[[versions."7.9".applets]]
+sym = "whisper"
+binary = "/usr/local/bin/whisper"
+paths = [
+    "/usr/local/bin/whisper",
+    "/usr/local/bin/whisper-cli",
+    "/usr/local/bin/whisper-server",
+    "/usr/local/bin/whisper-bench",
+    "/usr/local/bin/whisper-quantize",
+    "/usr/local/sbin/whisper-server",
+]
+
+[versions."8.0"]
+extract_only = ["whisper.cpp-1.9.4.tar.gz"]
+cmake_args = [
+    "-DCMAKE_SYSTEM_PROCESSOR=wasm64",
+    "-DBUILD_SHARED_LIBS=OFF",
+    "-DWHISPER_USE_SYSTEM_GGML=ON",
+    "-DWHISPER_BUILD_TESTS=OFF",
+    "-DWHISPER_BUILD_EXAMPLES=ON",
+    "-DWHISPER_BUILD_SERVER=ON",
+    "-DWHISPER_FFMPEG=OFF",
+    "-DWHISPER_COMMON_FFMPEG=OFF",
+    "-DWHISPER_SDL2=OFF",
+    "-DWHISPER_CURL=OFF",
+    "-DWHISPER_BUILD_IS_DEV=OFF",
+]
+
+[[versions."8.0".applets]]
+sym = "whisper"
+binary = "/usr/local/bin/whisper"
+paths = [
+    "/usr/local/bin/whisper",
+    "/usr/local/bin/whisper-cli",
+    "/usr/local/bin/whisper-server",
+    "/usr/local/bin/whisper-bench",
+    "/usr/local/bin/whisper-quantize",
+    "/usr/local/sbin/whisper-server",
+]

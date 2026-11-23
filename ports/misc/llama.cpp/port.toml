@@ -1,0 +1,118 @@
+port = "misc/llama.cpp"
+depends = ["devel/libggml", "net/curl"]
+build_style = "cmake"
+separate_build = true
+
+cflags = ["-msimd128"]
+cxxflags = ["-msimd128", "-U__cpp_lib_hardware_interference_size", "-include", "cerrno", "-include", "cstdlib", "-include", "algorithm"]
+
+pre_configure = [
+    "python3 -I \"$PORT_DIR/prepare_wasm.py\"",
+]
+
+cmake_args = [
+    "-DCMAKE_SYSTEM_PROCESSOR=wasm64",
+    "-DBUILD_SHARED_LIBS=OFF",
+    "-DLLAMA_USE_SYSTEM_GGML=ON",
+    "-DLLAMA_BUILD_TESTS=OFF",
+    "-DLLAMA_BUILD_TOOLS=ON",
+    "-DLLAMA_BUILD_SERVER=ON",
+    "-DLLAMA_TOOLS_INSTALL=ON",
+]
+
+post_install = [
+    "rm -f \"$STAGE_DIR\"/usr/local/bin/test-* \"$STAGE_DIR\"/usr/local/bin/convert_hf_to_gguf.py",
+    "python3 -I \"$PORT_DIR/prepare_wasm.py\" --post-install",
+]
+
+[[applets]]
+sym = "llama"
+binary = "/usr/local/bin/llama"
+paths = [
+    "/usr/local/bin/llama",
+    "/usr/local/bin/llama-cli",
+    "/usr/local/bin/llama-server",
+    "/usr/local/bin/llama-simple-chat",
+    "/usr/local/bin/llama-embedding",
+    "/usr/local/bin/llama-quantize",
+    "/usr/local/bin/llama-gguf",
+    "/usr/local/bin/llama-bench",
+]
+
+[versions."7.8"]
+cppflags = ["-DCURL_STATICLIB"]
+cxxflags = [
+    "-msimd128",
+    "-D_LIBCPP_ENABLE_CXX17_REMOVED_CODECVT",
+    "-U__cpp_lib_hardware_interference_size",
+    "-include", "cerrno",
+    "-include", "cstdlib",
+    "-include", "algorithm",
+    "-include", "functional",
+    "-include", "codecvt",
+    "-include", "locale",
+]
+ldflags = ["-lcurl", "-lzstd", "-lssl", "-lcrypto", "-lz"]
+cmake_args = [
+    "-DCMAKE_SYSTEM_PROCESSOR=wasm64",
+    "-DBUILD_SHARED_LIBS=OFF",
+    "-DLLAMA_USE_SYSTEM_GGML=ON",
+    "-DLLAMA_BUILD_TESTS=OFF",
+    "-DLLAMA_BUILD_TOOLS=ON",
+    "-DLLAMA_BUILD_EXAMPLES=ON",
+    "-DLLAMA_BUILD_SERVER=ON",
+    "-DLLAMA_TOOLS_INSTALL=ON",
+    "-DLLAMA_CURL=ON",
+]
+
+[versions."7.9"]
+ldflags = ["-lssl", "-lcrypto"]
+cmake_args = [
+    "-DCMAKE_SYSTEM_PROCESSOR=wasm64",
+    "-DBUILD_SHARED_LIBS=OFF",
+    "-DLLAMA_USE_SYSTEM_GGML=ON",
+    "-DLLAMA_BUILD_TESTS=OFF",
+    "-DLLAMA_BUILD_TOOLS=ON",
+    "-DLLAMA_BUILD_EXAMPLES=ON",
+    "-DLLAMA_BUILD_SERVER=ON",
+    "-DLLAMA_TOOLS_INSTALL=ON",
+    "-DLLAMA_OPENSSL=ON",
+]
+
+[versions."8.0"]
+extract_only = ["llama.cpp-0.5.0.tar.gz"]
+wrksrc_subdir = "llama.cpp-0.5.0"
+ldflags = ["-lssl", "-lcrypto"]
+cmake_args = [
+    "-DCMAKE_SYSTEM_PROCESSOR=wasm64",
+    "-DBUILD_SHARED_LIBS=OFF",
+    "-DLLAMA_USE_SYSTEM_GGML=ON",
+    "-DLLAMA_BUILD_TESTS=OFF",
+    "-DLLAMA_BUILD_EXAMPLES=OFF",
+    "-DLLAMA_BUILD_TOOLS=ON",
+    "-DLLAMA_BUILD_SERVER=ON",
+    "-DLLAMA_BUILD_APP=ON",
+    "-DLLAMA_TOOLS_INSTALL=ON",
+    "-DLLAMA_OPENSSL=ON",
+    "-DLLAMA_SUBPROCESS=ON",
+    "-DLLAMA_BUILD_IS_DEV=OFF",
+    "-DLLAMA_BUILD_NUMBER=11146",
+]
+
+[[versions."8.0".applets]]
+sym = "llama"
+binary = "/usr/local/bin/llama"
+paths = [
+    "/usr/local/bin/llama",
+    "/usr/local/bin/llama-cli",
+    "/usr/local/bin/llama-server",
+    "/usr/local/bin/llama-bench",
+    "/usr/local/bin/llama-batched-bench",
+    "/usr/local/bin/llama-quantize",
+    "/usr/local/bin/llama-completion",
+    "/usr/local/bin/llama-perplexity",
+    "/usr/local/bin/llama-fit-params",
+    "/usr/local/bin/llama-simple-chat",
+    "/usr/local/bin/llama-embedding",
+    "/usr/local/bin/llama-gguf",
+]

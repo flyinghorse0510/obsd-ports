@@ -1,0 +1,65 @@
+port = "graphics/stable-diffusion.cpp"
+only_versions = ["7.9", "8.0"]
+build_style = "cmake"
+separate_build = true
+
+# Vendor ggml patches apply AFTER moving ../ggml-<commit> into $WRKSRC/ggml in pre_configure
+skip_vendor_patches = [
+    "patch-ggml_CMakeLists_txt",
+    "patch-ggml_src_ggml-backend-reg_cpp",
+]
+
+cflags = ["-msimd128"]
+cxxflags = ["-msimd128", "-U__cpp_lib_hardware_interference_size", "-include", "cerrno", "-include", "cstdlib", "-include", "algorithm"]
+
+pre_configure = [
+    "python3 -I \"$PORT_DIR/prepare_wasm.py\"",
+]
+
+cmake_args = [
+    "-DCMAKE_SYSTEM_PROCESSOR=wasm64",
+    "-DBUILD_SHARED_LIBS=OFF",
+    "-DSD_BUILD_SHARED_LIBS=OFF",
+    "-DSD_BUILD_SHARED_GGML_LIB=OFF",
+    "-DSD_USE_SYSTEM_GGML=OFF",
+    "-DSD_WEBP=OFF",
+    "-DSD_WEBM=OFF",
+    "-DSD_VULKAN=OFF",
+    "-DSD_SERVER_BUILD_FRONTEND=OFF",
+    "-DGGML_STATIC=ON",
+    "-DGGML_BACKEND_DL=OFF",
+    "-DGGML_VULKAN=OFF",
+    "-DGGML_LTO=OFF",
+    "-DGGML_NATIVE=OFF",
+    "-DGGML_CPU_ALL_VARIANTS=OFF",
+    "-DGGML_RVV=OFF",
+    "-DGGML_LASX=OFF",
+    "-DGGML_LSX=OFF",
+    "-DGGML_VXE=OFF",
+    "-DGGML_OPENMP=OFF",
+    "-DGGML_CCACHE=OFF",
+    "-DGGML_BUILD_TESTS=OFF",
+    "-DGGML_BUILD_EXAMPLES=OFF",
+]
+
+# Install into an isolated temp DESTDIR first so bundled ggml headers/libs can be stripped
+# without touching devel/libggml's files in the shared lane $STAGE_DIR!
+install_cmd = [
+    "python3 -I \"$PORT_DIR/prepare_wasm.py\" --install",
+]
+
+[[applets]]
+sym = "sd"
+binary = "/usr/local/bin/sd"
+paths = [
+    "/usr/local/bin/sd",
+    "/usr/local/bin/sd-cli",
+    "/usr/local/bin/sd-server",
+]
+
+[versions."7.9"]
+wrksrc_subdir = "stable-diffusion.cpp-master-537-545fac4"
+
+[versions."8.0"]
+wrksrc_subdir = "stable-diffusion.cpp-master-899-28b454b"
+skip_distfiles = ["5bf12267eea773a32fcf4949de52b0add158a8d5.tar.gz"]

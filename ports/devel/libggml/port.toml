@@ -1,0 +1,36 @@
+port = "devel/libggml"
+build_style = "cmake"
+separate_build = true
+
+cflags = ["-msimd128"]
+cxxflags = ["-msimd128", "-include", "cerrno", "-include", "cstdlib", "-include", "algorithm"]
+
+pre_configure = [
+    "python3 -I \"$PORT_DIR/fix_pc.py\" --pre-configure \"$WRKSRC\"",
+]
+
+cmake_args = [
+    "-DCMAKE_SYSTEM_PROCESSOR=wasm64",
+    "-DBUILD_SHARED_LIBS=OFF",
+    "-DGGML_STATIC=ON",
+    "-DGGML_BACKEND_DL=OFF",
+    "-DGGML_VULKAN=OFF",
+    "-DGGML_LTO=OFF",
+    "-DGGML_NATIVE=OFF",
+    "-DGGML_CPU_ALL_VARIANTS=OFF",
+    "-DGGML_RVV=OFF",
+    "-DGGML_LASX=OFF",
+    "-DGGML_LSX=OFF",
+    "-DGGML_VXE=OFF",
+    "-DGGML_OPENMP=OFF",
+    "-DGGML_CCACHE=OFF",
+    "-DGGML_BUILD_TESTS=OFF",
+    "-DGGML_BUILD_EXAMPLES=OFF",
+]
+
+post_install = [
+    "python3 -I \"$PORT_DIR/fix_pc.py\" \"$STAGE_DIR\"",
+]
+
+[versions."8.0"]
+pkgname = "libggml-0.25.3p0"
