@@ -1,0 +1,6 @@
+AIChat is an all-in-one LLM CLI tool featuring Shell Assistant, CMD & REPL
+modes, Retrieval-Augmented Generation (RAG), AI Tools & Agents, and a built-in
+OpenAI-compatible HTTP proxy server with embedded Playground and Arena WebUIs.
+
+Supports OpenAI, Claude, Gemini, Ollama, Groq, Mistral, DeepSeek, VertexAI,
+Bedrock, and any OpenAI-compatible endpoint in a single JIT-free binary.

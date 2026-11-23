@@ -1,0 +1,30 @@
+--- src/serve.rs.orig
++++ src/serve.rs
+@@ -118,6 +118,15 @@
+                         let Ok((cnx, _)) = res else {
+                             continue;
+                         };
++                        let Ok(std_cnx) = cnx.into_std() else {
++                            continue;
++                        };
++                        if std_cnx.set_nonblocking(true).is_err() {
++                            continue;
++                        }
++                        let Ok(cnx) = tokio::net::TcpStream::from_std(std_cnx) else {
++                            continue;
++                        };
+ 
+                         let stream = TokioIo::new(cnx);
+                         let server = self.clone();
+@@ -125,7 +134,10 @@
+                             let hyper_service = service_fn(move |request: hyper::Request<Incoming>| {
+                                 server.clone().handle(request)
+                             });
+-                            let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
++                            let mut builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
++                            #[cfg(target_arch = "wasm64")]
++                            builder.http1().keep_alive(false);
++                            let _ = builder
+                                 .serve_connection_with_upgrades(stream, hyper_service)
+                                 .await;
+                         });

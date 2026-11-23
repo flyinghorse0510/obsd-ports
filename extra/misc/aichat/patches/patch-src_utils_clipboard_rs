@@ -1,0 +1,52 @@
+--- src/utils/clipboard.rs.orig
++++ src/utils/clipboard.rs
+@@ -1,6 +1,11 @@
+ use anyhow::Context;
+ 
+-#[cfg(not(any(target_os = "android", target_os = "emscripten")))]
++#[cfg(not(any(
++    target_os = "android",
++    target_os = "emscripten",
++    target_os = "ios",
++    target_os = "wasi"
++)))]
+ mod internal {
+     use arboard::Clipboard;
+     use base64::{engine::general_purpose::STANDARD, Engine as _};
+@@ -10,13 +15,17 @@
+         LazyLock::new(|| Mutex::new(Clipboard::new().ok()));
+ 
+     pub fn set_text(text: &str) -> anyhow::Result<()> {
+-        let mut clipboard = CLIPBOARD.lock().unwrap();
++        let mut clipboard = CLIPBOARD
++            .lock()
++            .unwrap_or_else(|poisoned| poisoned.into_inner());
+         match clipboard.as_mut() {
+             Some(clipboard) => {
+-                clipboard.set_text(text)?;
+-                #[cfg(target_os = "linux")]
+-                std::thread::sleep(std::time::Duration::from_millis(50));
+-                Ok(())
++                if clipboard.set_text(text).is_ok() {
++                    #[cfg(target_os = "linux")]
++                    std::thread::sleep(std::time::Duration::from_millis(50));
++                    return Ok(());
++                }
++                set_text_osc52(text)
+             }
+             None => set_text_osc52(text),
+         }
+@@ -37,7 +46,12 @@
+     }
+ }
+ 
+-#[cfg(any(target_os = "android", target_os = "emscripten"))]
++#[cfg(any(
++    target_os = "android",
++    target_os = "emscripten",
++    target_os = "ios",
++    target_os = "wasi"
++))]
+ mod internal {
+     pub fn set_text(_text: &str) -> anyhow::Result<()> {
+         Err(anyhow::anyhow!("No clipboard available"))

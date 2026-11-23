@@ -1,0 +1,56 @@
+port = "misc/aichat"
+build_style = "cargo"
+cargo_bins = ["aichat"]
+
+only_for_versions = ["7.8", "7.9", "8.0"]
+only_for_backends = ["emulate", "translate"]
+only_for_pals = ["emscripten", "wasi", "darwin", "ios", "linux"]
+
+post_install = [
+    "$INSTALL_DATA_DIR \"$STAGE_DIR/usr/local/share/bash-completion/completions\"",
+    "$INSTALL_DATA \"$WRKSRC/scripts/completions/aichat.bash\" \"$STAGE_DIR/usr/local/share/bash-completion/completions/aichat\"",
+    "$INSTALL_DATA_DIR \"$STAGE_DIR/usr/local/share/fish/vendor_completions.d\"",
+    "$INSTALL_DATA \"$WRKSRC/scripts/completions/aichat.fish\" \"$STAGE_DIR/usr/local/share/fish/vendor_completions.d/aichat.fish\"",
+    "$INSTALL_DATA_DIR \"$STAGE_DIR/usr/local/share/zsh/site-functions\"",
+    "$INSTALL_DATA \"$WRKSRC/scripts/completions/aichat.zsh\" \"$STAGE_DIR/usr/local/share/zsh/site-functions/_aichat\"",
+]
+
+[versions."7.8"]
+env = { OBSD_TARGET_RELEASE = "7.8" }
+
+[versions."7.9"]
+env = { OBSD_TARGET_RELEASE = "7.9" }
+
+[versions."8.0"]
+env = { OBSD_TARGET_RELEASE = "8.0" }
+
+[backends.emulate]
+[[backends.emulate.applets]]
+sym = "aichat"
+binary = "/usr/local/bin/aichat"
+paths = ["/usr/local/bin/aichat"]
+entry = "auto"
+
+[backends.translate]
+applets = []
+
+[pals.emscripten]
+env = { TOKIO_WORKER_THREADS = "2", RAYON_NUM_THREADS = "2" }
+
+[pals.ios]
+env = { OBSD_IOS_WX_JIT_FREE = "1" }
+
+[pals.darwin]
+env = { OBSD_DARWIN_SEAM = "1" }
+
+[pals.wasi]
+env = { OBSD_WASI_HEADLESS = "1" }
+
+[pals.linux]
+env = { OBSD_LINUX_SEAM = "1" }
+
+[targets."emulate/emscripten"]
+env = { TOKIO_WORKER_THREADS = "2", RAYON_NUM_THREADS = "2" }
+
+[targets."emulate/ios"]
+env = { OBSD_IOS_EMULATE_APPLET = "1" }

@@ -1,0 +1,10 @@
+@bin bin/aichat
+share/bash-completion/
+share/bash-completion/completions/
+share/bash-completion/completions/aichat
+share/fish/
+share/fish/vendor_completions.d/
+share/fish/vendor_completions.d/aichat.fish
+share/zsh/
+share/zsh/site-functions/
+share/zsh/site-functions/_aichat

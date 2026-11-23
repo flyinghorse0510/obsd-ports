@@ -1,0 +1,12 @@
+--- modcargo-crates/hnsw_rs-0.3.2/Cargo.toml.orig
++++ modcargo-crates/hnsw_rs-0.3.2/Cargo.toml
+@@ -102,9 +102,6 @@
+ [dependencies.log]
+ version = "0.4"
+ 
+-[dependencies.mmap-rs]
+-version = "0.6"
+-
+ [dependencies.num-traits]
+ version = "0.2"
+ 
