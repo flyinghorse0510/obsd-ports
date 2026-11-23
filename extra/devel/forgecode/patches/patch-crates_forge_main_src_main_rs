@@ -1,0 +1,48 @@
+Index: crates/forge_main/src/main.rs
+--- crates/forge_main/src/main.rs.orig
++++ crates/forge_main/src/main.rs
+@@ -44,15 +44,40 @@
+     }
+ }
+ 
+-#[tokio::main]
+-async fn main() {
++fn main() {
++    let mut builder = tokio::runtime::Builder::new_multi_thread();
++    builder.enable_all();
++    #[cfg(target_arch = "wasm64")]
++    {
++        let workers = std::env::var("TOKIO_WORKER_THREADS")
++            .ok()
++            .and_then(|v| v.parse::<usize>().ok())
++            .filter(|&n| n > 0)
++            .unwrap_or(4);
++        builder
++            .worker_threads(workers)
++            .max_blocking_threads(4)
++            .thread_keep_alive(std::time::Duration::from_millis(1));
++    }
++    let runtime = builder.build().expect("Failed to initialize Tokio runtime");
++    let code = runtime.block_on(async_main());
++    drop(runtime);
++    #[cfg(target_arch = "wasm64")]
++    std::thread::sleep(std::time::Duration::from_millis(25));
++    if code != 0 {
++        std::process::exit(code);
++    }
++}
++
++async fn async_main() -> i32 {
+     if let Err(err) = run().await {
+         eprintln!("{}", TitleFormat::error(format!("{err}")).display());
+         if let Some(cause) = err.chain().nth(1) {
+             eprintln!("{cause}");
+         }
+-        std::process::exit(1);
+-    }
++        return 1;
++    }
++    0
+ }
+ 
+ async fn run() -> Result<()> {

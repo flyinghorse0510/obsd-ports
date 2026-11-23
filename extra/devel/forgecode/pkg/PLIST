@@ -1,0 +1,5 @@
+@bin bin/forge
+bin/forgecode
+share/forgecode/forge.plugin.zsh
+share/forgecode/forge.setup.zsh
+share/forgecode/forge.theme.zsh

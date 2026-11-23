@@ -1,0 +1,21 @@
+Index: crates/forge_tracker/src/dispatch.rs
+--- crates/forge_tracker/src/dispatch.rs.orig
++++ crates/forge_tracker/src/dispatch.rs
+@@ -72,11 +72,15 @@
+ 
+ impl Default for Tracker {
+     fn default() -> Self {
+-        let posthog_tracker = Box::new(posthog::Tracker::new(POSTHOG_API_SECRET));
+         let start_time = Utc::now();
+         let can_track = can_track();
++        let collectors: Vec<Box<dyn Collect>> = if can_track {
++            vec![Box::new(posthog::Tracker::new(POSTHOG_API_SECRET))]
++        } else {
++            vec![]
++        };
+         Self {
+-            collectors: Arc::new(vec![posthog_tracker]),
++            collectors: Arc::new(collectors),
+             can_track,
+             start_time,
+             email: Arc::new(Mutex::new(None)),

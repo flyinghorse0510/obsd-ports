@@ -1,0 +1,33 @@
+Index: crates/forge_main/src/ui.rs
+--- crates/forge_main/src/ui.rs.orig
++++ crates/forge_main/src/ui.rs
+@@ -2838,12 +2838,12 @@
+                 ))?;
+             }
+             Some(content) => {
+-                #[cfg(not(target_os = "android"))]
++                #[cfg(not(any(target_os = "android", target_os = "ios", target_os = "wasi")))]
+                 let copied = arboard::Clipboard::new()
+                     .and_then(|mut cb| cb.set_text(content.clone()))
+                     .is_ok();
+ 
+-                #[cfg(target_os = "android")]
++                #[cfg(any(target_os = "android", target_os = "ios", target_os = "wasi"))]
+                 let copied = false;
+ 
+                 if copied {
+@@ -3237,12 +3237,12 @@
+         ))?;
+         // Try to copy code to clipboard automatically (not available on
+         // Android)
+-        #[cfg(not(target_os = "android"))]
++        #[cfg(not(any(target_os = "android", target_os = "ios", target_os = "wasi")))]
+         let clipboard_copied = arboard::Clipboard::new()
+             .and_then(|mut clipboard| clipboard.set_text(user_code))
+             .is_ok();
+ 
+-        #[cfg(target_os = "android")]
++        #[cfg(any(target_os = "android", target_os = "ios", target_os = "wasi"))]
+         let clipboard_copied = false;
+ 
+         if clipboard_copied {

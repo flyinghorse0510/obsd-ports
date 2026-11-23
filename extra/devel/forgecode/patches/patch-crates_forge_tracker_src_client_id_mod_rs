@@ -1,0 +1,19 @@
+Index: crates/forge_tracker/src/client_id/mod.rs
+--- crates/forge_tracker/src/client_id/mod.rs.orig
++++ crates/forge_tracker/src/client_id/mod.rs
+@@ -1,11 +1,11 @@
+-#[cfg(target_os = "android")]
++#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+ mod android;
+-#[cfg(not(target_os = "android"))]
++#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+ mod generic;
+ 
+-#[cfg(target_os = "android")]
++#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+ pub use android::get_or_create_client_id;
+-#[cfg(not(target_os = "android"))]
++#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+ pub use generic::get_or_create_client_id;
+ 
+ pub const DEFAULT_CLIENT_ID: &str = "<anonymous>";

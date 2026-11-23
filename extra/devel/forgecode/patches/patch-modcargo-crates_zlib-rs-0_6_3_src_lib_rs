@@ -1,0 +1,10 @@
+Index: modcargo-crates/zlib-rs-0.6.3/src/lib.rs
+--- modcargo-crates/zlib-rs-0.6.3/src/lib.rs.orig
++++ modcargo-crates/zlib-rs-0.6.3/src/lib.rs
+@@ -1,5 +1,6 @@
+ #![doc = core::include_str!("../README.md")]
+ #![cfg_attr(not(any(test, feature = "rust-allocator")), no_std)]
++#![cfg_attr(target_arch = "wasm64", feature(simd_wasm64))]
+ 
+ #[cfg(any(feature = "rust-allocator", feature = "c-allocator"))]
+ extern crate alloc;

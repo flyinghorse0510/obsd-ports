@@ -1,0 +1,12 @@
+Index: crates/forge_main/Cargo.toml
+--- crates/forge_main/Cargo.toml.orig
++++ crates/forge_main/Cargo.toml
+@@ -78,7 +78,7 @@
+ enable-ansi-support.workspace = true
+ windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
+ 
+-[target.'cfg(not(target_os = "android"))'.dependencies]
++[target.'cfg(not(any(target_os = "android", target_os = "ios", target_os = "wasi")))'.dependencies]
+ arboard = "3.4"
+ 
+ [dev-dependencies]
