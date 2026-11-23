@@ -1,0 +1,9 @@
+port = "devel/py-certifi"
+only_versions = ["8.0"]
+depends = ["lang/python/3"]
+build_style = "script"
+
+build_cmd = [
+    "grep -q '/etc/ssl/cert.pem' \"$WRKSRC/certifi/core.py\"",
+    "python3 -I \"$OBSD_PORTS_ROOT/ports/lang/python/3/files/install_pure_python.py\" --package certifi",
+]

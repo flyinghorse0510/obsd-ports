@@ -1,0 +1,28 @@
+port = "devel/swival"
+only_versions = ["8.0"]
+depends = [
+    "lang/python/3",
+    "devel/py-wcwidth",
+    "devel/py-prompt_toolkit",
+    "textproc/py-mdurl",
+    "textproc/py-markdown-it",
+    "textproc/py-pygments",
+    "devel/py-rich",
+    "security/py-fast-cipher",
+    "devel/py-certifi",
+    "net/py-idna",
+    "devel/py-sniffio",
+    "devel/py-typing-extensions",
+    "net/py-anyio",
+    "www/py-h11",
+    "www/py-httpcore",
+    "www/py-httpx",
+    "devel/py-click",
+    "www/py-starlette",
+    "www/py-uvicorn",
+]
+build_style = "script"
+
+build_cmd = [
+    "python3 -I \"$OBSD_PORTS_ROOT/ports/lang/python/3/files/install_pure_python.py\" --package swival --extra-site-dir \"$PORT_DIR/files\" --script swival=swival.agent:main",
+]

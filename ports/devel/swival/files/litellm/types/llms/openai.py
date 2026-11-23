@@ -1,0 +1,13 @@
+class ResponsesAPIStreamEvents:
+    RESPONSE_CREATED = "response.created"
+    RESPONSE_IN_PROGRESS = "response.in_progress"
+    RESPONSE_COMPLETED = "response.completed"
+    RESPONSE_FAILED = "response.failed"
+    OUTPUT_ITEM_ADDED = "response.output_item.added"
+    OUTPUT_ITEM_DONE = "response.output_item.done"
+    CONTENT_PART_ADDED = "response.content_part.added"
+    CONTENT_PART_DONE = "response.content_part.done"
+    OUTPUT_TEXT_DELTA = "response.output_text.delta"
+    OUTPUT_TEXT_DONE = "response.output_text.done"
+    FUNCTION_CALL_ARGUMENTS_DELTA = "response.function_call_arguments.delta"
+    FUNCTION_CALL_ARGUMENTS_DONE = "response.function_call_arguments.done"

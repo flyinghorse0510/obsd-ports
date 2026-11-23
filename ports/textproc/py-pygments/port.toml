@@ -1,0 +1,7 @@
+port = "textproc/py-pygments"
+depends = ["lang/python/3"]
+build_style = "script"
+
+build_cmd = [
+    "python3 -I \"$OBSD_PORTS_ROOT/ports/lang/python/3/files/install_pure_python.py\" --package pygments --script pygmentize=pygments.cmdline:main",
+]

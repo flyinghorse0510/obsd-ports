@@ -1,0 +1,13 @@
+port = "www/py-uvicorn"
+only_versions = ["8.0"]
+depends = [
+    "lang/python/3",
+    "devel/py-click",
+    "www/py-h11",
+    "www/py-httpx",
+]
+build_style = "script"
+
+build_cmd = [
+    "python3 -I \"$OBSD_PORTS_ROOT/ports/lang/python/3/files/install_pure_python.py\" --package uvicorn --script uvicorn=uvicorn.main:main",
+]

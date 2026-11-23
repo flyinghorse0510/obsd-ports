@@ -1,0 +1,15 @@
+port = "www/py-httpx"
+only_versions = ["8.0"]
+depends = [
+    "lang/python/3",
+    "devel/py-certifi",
+    "devel/py-sniffio",
+    "net/py-anyio",
+    "net/py-idna",
+    "www/py-httpcore",
+]
+build_style = "script"
+
+build_cmd = [
+    "python3 -I \"$OBSD_PORTS_ROOT/ports/lang/python/3/files/install_pure_python.py\" --package httpx",
+]
