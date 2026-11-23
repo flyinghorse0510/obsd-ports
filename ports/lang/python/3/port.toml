@@ -1,0 +1,46 @@
+port = "lang/python/3"
+depends = [
+    "archivers/bzip2",
+    "archivers/xz",
+    "databases/sqlite3",
+    "converters/libiconv",
+]
+build_style = "script"
+separate_build = true
+use_gmake = true
+
+[versions."7.8"]
+pkgname = "python-3.12.11"
+
+[[versions."7.8".applets]]
+sym = "python3"
+binary = "/usr/local/bin/python3.12"
+paths = [
+    "/usr/local/bin/python3.12",
+    "/usr/local/bin/python3",
+    "/usr/local/bin/python",
+]
+
+[versions."7.9"]
+pkgname = "python-3.13.13"
+
+[[versions."7.9".applets]]
+sym = "python3"
+binary = "/usr/local/bin/python3.13"
+paths = [
+    "/usr/local/bin/python3.13",
+    "/usr/local/bin/python3",
+    "/usr/local/bin/python",
+]
+
+[versions."8.0"]
+pkgname = "python-3.14.7"
+
+[[versions."8.0".applets]]
+sym = "python3"
+binary = "/usr/local/bin/python3.14"
+paths = [
+    "/usr/local/bin/python3.14",
+    "/usr/local/bin/python3",
+    "/usr/local/bin/python",
+]

@@ -1,0 +1,17 @@
+--- swival/_env.py.orig
++++ swival/_env.py
+@@ -35,7 +35,13 @@ def child_env(extra: Mapping[str, str] | None = None) -> dict[str, str]:
+     ``PATH`` is only set in the returned dict if it was present in the
+     merged environment; an absent ``PATH`` is preserved as absent.
+     """
+-    user_activated = _user_activated_own_venv(os.environ)
++    # Only strip <sys.prefix>/bin when running inside an isolated virtualenv.
++    # On OpenBSD system installs, sys.prefix == sys.base_prefix == '/usr/local',
++    # so stripping <sys.prefix>/bin would remove /usr/local/bin from PATH.
++    if sys.prefix == getattr(sys, "base_prefix", sys.prefix):
++        user_activated = True
++    else:
++        user_activated = _user_activated_own_venv(os.environ)
+ 
+     env = os.environ.copy()
+     if extra:
