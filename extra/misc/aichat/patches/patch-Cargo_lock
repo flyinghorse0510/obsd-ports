@@ -1,0 +1,10 @@
+--- Cargo.lock.orig
++++ Cargo.lock
+@@ -1266,7 +1266,6 @@
+  "indexmap",
+  "lazy_static",
+  "log",
+- "mmap-rs",
+  "num-traits",
+  "num_cpus",
+  "parking_lot",

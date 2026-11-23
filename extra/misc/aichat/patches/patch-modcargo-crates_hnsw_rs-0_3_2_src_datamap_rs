@@ -1,0 +1,75 @@
+--- modcargo-crates/hnsw_rs-0.3.2/src/datamap.rs.orig
++++ modcargo-crates/hnsw_rs-0.3.2/src/datamap.rs
+@@ -7,12 +7,11 @@
+ 
+ use std::io::BufReader;
+ 
+-use std::fs::{File, OpenOptions};
++use std::fs::OpenOptions;
+ use std::path::{Path, PathBuf};
+ 
+ use indexmap::map::IndexMap;
+ use log::{debug, error, info, trace};
+-use mmap_rs::{Mmap, MmapOptions};
+ 
+ use crate::hnsw::DataId;
+ use crate::hnswio;
+@@ -25,7 +24,7 @@
+     /// File containing Points data
+     _datapath: PathBuf,
+     /// The mmap structure
+-    mmap: Mmap,
++    mmap: Vec<u8>,
+     /// map a dataId to an address where we get a bson encoded vector of type T
+     hmap: IndexMap<DataId, usize>,
+     /// type name of Data
+@@ -91,29 +90,13 @@
+         filename.push_str(".hnsw.data");
+         datapath.push(filename);
+         //
+-        let meta = std::fs::metadata(&datapath);
+-        if meta.is_err() {
+-            error!("Could not open file : {:?}", &datapath);
+-            std::process::exit(1);
+-        }
+-        let fsize = meta.unwrap().len().try_into().unwrap();
+-        //
+-        let file_res = File::open(&datapath);
+-        if file_res.is_err() {
+-            error!("Could not open file : {:?}", &datapath);
+-            std::process::exit(1);
+-        }
+-        let file = file_res.unwrap();
+-        let offset = 0;
+-        //
+-        let mmap_opt = MmapOptions::new(fsize).unwrap();
+-        let mmap_opt = unsafe { mmap_opt.with_file(&file, offset) };
+-        let mapping_res = mmap_opt.map();
+-        if mapping_res.is_err() {
+-            error!("Could not memory map : {:?}", &datapath);
+-            std::process::exit(1);
+-        }
+-        let mmap = mapping_res.unwrap();
++        let mmap = match std::fs::read(&datapath) {
++            Ok(buf) => buf,
++            Err(_) => {
++                error!("Could not open file : {:?}", &datapath);
++                std::process::exit(1);
++            }
++        };
+         //
+         info!("Mmap done on file : {:?}", &datapath);
+         //
+@@ -153,10 +136,10 @@
+         let record_size = std::mem::size_of::<u32>()
+             + 2 * std::mem::size_of::<u64>()
+             + dimension * std::mem::size_of::<T>();
+-        let residual = mmap.size() - current_mmap_addr;
++        let residual = mmap.len() - current_mmap_addr;
+         info!(
+             "Mmap size {}, current_mmap_addr {}, residual : {}",
+-            mmap.size(),
++            mmap.len(),
+             current_mmap_addr,
+             residual
+         );

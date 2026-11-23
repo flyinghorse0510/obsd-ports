@@ -1,0 +1,61 @@
+--- src/main.rs.orig
++++ src/main.rs
+@@ -33,8 +33,44 @@
+ use simplelog::{format_description, ConfigBuilder, LevelFilter, SimpleLogger, WriteLogger};
+ use std::{env, io::stdin, process, sync::Arc};
+ 
+-#[tokio::main]
+-async fn main() -> Result<()> {
++fn main() -> Result<()> {
++    #[cfg(target_arch = "wasm64")]
++    {
++        let rayon_threads = env::var("RAYON_NUM_THREADS")
++            .ok()
++            .and_then(|v| v.parse::<usize>().ok())
++            .filter(|&n| n > 0)
++            .unwrap_or(2);
++        let _ = rayon::ThreadPoolBuilder::new()
++            .num_threads(rayon_threads)
++            .build_global();
++    }
++
++    let mut rt_builder = tokio::runtime::Builder::new_multi_thread();
++    rt_builder.enable_all();
++    #[cfg(target_arch = "wasm64")]
++    {
++        let tokio_threads = env::var("TOKIO_WORKER_THREADS")
++            .ok()
++            .and_then(|v| v.parse::<usize>().ok())
++            .filter(|&n| n > 0)
++            .unwrap_or(2);
++        rt_builder.worker_threads(tokio_threads);
++        rt_builder.max_blocking_threads(2);
++        rt_builder.thread_keep_alive(std::time::Duration::from_millis(1));
++    }
++    let rt = rt_builder.build()?;
++    let exit_code = rt.block_on(async_main())?;
++    drop(rt);
++    #[cfg(target_arch = "wasm64")]
++    std::thread::sleep(std::time::Duration::from_millis(25));
++    if exit_code != 0 {
++        std::process::exit(exit_code);
++    }
++    Ok(())
++}
++
++async fn async_main() -> Result<i32> {
+     load_env_file()?;
+     let cli = Cli::parse();
+     let text = cli.text()?;
+@@ -57,9 +93,9 @@
+     let config = Arc::new(RwLock::new(Config::init(working_mode, info_flag).await?));
+     if let Err(err) = run(config, cli, text).await {
+         render_error(err);
+-        std::process::exit(1);
++        return Ok(1);
+     }
+-    Ok(())
++    Ok(0)
+ }
+ 
+ async fn run(config: GlobalConfig, cli: Cli, text: Option<String>) -> Result<()> {

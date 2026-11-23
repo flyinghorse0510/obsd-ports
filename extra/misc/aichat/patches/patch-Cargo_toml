@@ -1,0 +1,11 @@
+--- Cargo.toml.orig
++++ Cargo.toml
+@@ -85,7 +85,7 @@
+ [target.'cfg(target_os = "linux")'.dependencies]
+ arboard = { version = "3.3.0", default-features = false, features = ["wayland-data-control"] }
+ 
+-[target.'cfg(not(any(target_os = "linux", target_os = "android", target_os = "emscripten")))'.dependencies]
++[target.'cfg(not(any(target_os = "linux", target_os = "android", target_os = "emscripten", target_os = "ios", target_os = "wasi")))'.dependencies]
+ arboard = { version = "3.3.0", default-features = false }
+ 
+ [dev-dependencies]

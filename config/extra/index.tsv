@@ -12,3 +12,4 @@
 port	category	pkgname_base	upstream_url	jit_free	versions	backends	pals	notes
 devel/forgecode	devel	forgecode	https://github.com/antinomyhq/forge	yes	7.8,7.9,8.0	emulate,translate	emscripten,wasi,darwin,ios,linux	AI-enabled pair programmer and coding agent for the terminal (v2.14.0)
 devel/goose	devel	goose	https://github.com/block/goose	yes	7.8,7.9,8.0	emulate,translate	emscripten,wasi,darwin,ios,linux	Extensible open-source AI agent with pure-Rust boa_engine code-mode and MCP support
+misc/aichat	misc	aichat	https://github.com/sigoden/aichat	yes	7.8,7.9,8.0	emulate,translate	emscripten,wasi,darwin,ios,linux	All-in-one JIT-free LLM CLI tool with shell assistant, REPL, RAG, agents, and HTTP server
