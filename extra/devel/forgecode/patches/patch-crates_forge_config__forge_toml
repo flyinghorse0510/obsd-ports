@@ -1,0 +1,23 @@
+Index: crates/forge_config/.forge.toml
+--- crates/forge_config/.forge.toml.orig
++++ crates/forge_config/.forge.toml
+@@ -32,7 +32,7 @@
+ currency_symbol = "$"
+ currency_conversion_rate = 1.0
+ subagents = true
+-auto_install_vscode_extension = true
++auto_install_vscode_extension = false
+ use_forge_committer = true
+ use_text_patch_fallback = false
+ 
+@@ -67,8 +67,8 @@
+ token_threshold = 100000
+ 
+ [updates]
+-auto_update = true
+-frequency = "daily"
++auto_update = false
++frequency = "never"
+ 
+ [reasoning]
+ enabled = true

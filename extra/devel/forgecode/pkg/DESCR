@@ -1,0 +1,9 @@
+ForgeCode (forge) is an AI-enabled pair programmer and autonomous coding agent
+for the terminal. It integrates directly with existing development environments
+and shells, providing file reading, writing, multi-hunk patching, regex code
+search, shell command execution, Git commit generation, MCP client support, and
+persistent SQLite conversation history across OpenAI, Anthropic, Google, AWS
+Bedrock, and OpenAI-compatible local or remote LLM providers.
+
+This build is 100% JIT-free (pure-Rust regex/grep-regex, rustls, and bundled
+SQLite) for strict W^X compliance across OpenBSD, WASM64, and iOS targets.

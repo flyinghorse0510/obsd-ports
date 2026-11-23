@@ -1,0 +1,15 @@
+Index: crates/forge_infra/src/env.rs
+--- crates/forge_infra/src/env.rs.orig
++++ crates/forge_infra/src/env.rs
+@@ -20,7 +20,10 @@
+         shell: if cfg!(target_os = "windows") {
+             std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
+         } else {
+-            std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
++            std::env::var("SHELL")
++                .ok()
++                .filter(|sh| !sh.is_empty() && std::path::Path::new(sh).exists())
++                .unwrap_or_else(|| "/bin/sh".to_string())
+         },
+         base_path: ConfigReader::base_path(),
+     }

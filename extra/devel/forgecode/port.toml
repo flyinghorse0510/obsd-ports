@@ -1,0 +1,61 @@
+port = "devel/forgecode"
+build_style = "cargo"
+
+only_for_versions = ["7.8", "7.9", "8.0"]
+only_for_backends = ["emulate", "translate"]
+only_for_pals = ["emscripten", "wasi", "darwin", "ios", "linux"]
+
+cargo_packages = ["forge_main"]
+cargo_bins = ["forge"]
+
+env = { APP_VERSION = "2.14.0", FORGE_TRACKER = "false" }
+
+post_install = [
+    "ln -sf forge \"$STAGE_DIR/usr/local/bin/forgecode\"",
+    "mkdir -p \"$STAGE_DIR/usr/local/share/forgecode\"",
+    "obsd-install -c -m 0644 \"$WRKSRC/shell-plugin/forge.plugin.zsh\" \"$STAGE_DIR/usr/local/share/forgecode/forge.plugin.zsh\"",
+    "obsd-install -c -m 0644 \"$WRKSRC/shell-plugin/forge.setup.zsh\" \"$STAGE_DIR/usr/local/share/forgecode/forge.setup.zsh\"",
+    "obsd-install -c -m 0644 \"$WRKSRC/shell-plugin/forge.theme.zsh\" \"$STAGE_DIR/usr/local/share/forgecode/forge.theme.zsh\"",
+]
+
+[versions."7.8"]
+env = { OBSD_FORGECODE_OPENBSD_RELEASE = "7.8" }
+
+[versions."7.9"]
+env = { OBSD_FORGECODE_OPENBSD_RELEASE = "7.9" }
+
+[versions."8.0"]
+env = { OBSD_FORGECODE_OPENBSD_RELEASE = "8.0" }
+
+[backends.emulate]
+[[backends.emulate.applets]]
+sym = "forge"
+binary = "/usr/local/bin/forge"
+paths = [
+    "/usr/local/bin/forge",
+    "/usr/local/bin/forgecode",
+]
+
+[backends.translate]
+applets = []
+
+[pals.emscripten]
+env = { OBSD_FORGECODE_PAL = "emscripten", OBSD_FORGECODE_JIT_FREE = "1" }
+
+[pals.ios]
+env = { OBSD_FORGECODE_PAL = "ios", OBSD_FORGECODE_JIT_FREE = "1" }
+
+[pals.darwin]
+env = { OBSD_FORGECODE_PAL = "darwin", OBSD_FORGECODE_JIT_FREE = "1" }
+
+[pals.wasi]
+env = { OBSD_FORGECODE_PAL = "wasi", OBSD_FORGECODE_JIT_FREE = "1" }
+
+[pals.linux]
+env = { OBSD_FORGECODE_PAL = "linux", OBSD_FORGECODE_JIT_FREE = "1" }
+
+[targets."emulate/emscripten"]
+env = { OBSD_FORGECODE_TARGET = "emulate/emscripten", TOKIO_WORKER_THREADS = "4" }
+
+[targets."emulate/ios"]
+env = { OBSD_FORGECODE_TARGET = "emulate/ios", OBSD_STRICT_WX_NO_JIT = "1" }

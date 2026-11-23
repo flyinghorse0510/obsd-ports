@@ -1,0 +1,15 @@
+Index: crates/forge_tracker/src/can_track.rs
+--- crates/forge_tracker/src/can_track.rs.orig
++++ crates/forge_tracker/src/can_track.rs
+@@ -6,7 +6,10 @@
+ 
+ /// Checks if tracking is enabled
+ pub fn can_track() -> bool {
+-    can_track_inner(Some(VERSION))
++    let opt_in = std::env::var("FORGE_TRACKER")
++        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
++        .unwrap_or(false);
++    opt_in && option_env!("POSTHOG_API_SECRET").is_some() && can_track_inner(Some(VERSION))
+ }
+ 
+ fn can_track_inner<V: AsRef<str>>(version: Option<V>) -> bool {

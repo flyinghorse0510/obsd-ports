@@ -1,0 +1,17 @@
+Index: crates/forge_repo/src/validation.rs
+--- crates/forge_repo/src/validation.rs.orig
++++ crates/forge_repo/src/validation.rs
+@@ -32,6 +32,13 @@
+         path: impl AsRef<Path> + Send,
+         content: &str,
+     ) -> Result<Vec<SyntaxError>> {
++        let remote_enabled = std::env::var("FORGE_REMOTE_VALIDATION")
++            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
++            .unwrap_or(false);
++        if !remote_enabled {
++            return Ok(vec![]);
++        }
++
+         let path = path.as_ref();
+         let path_str = path.to_string_lossy().to_string();
+ 

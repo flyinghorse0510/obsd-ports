@@ -1,0 +1,164 @@
+Index: crates/forge_infra/src/executor.rs
+--- crates/forge_infra/src/executor.rs.orig
++++ crates/forge_infra/src/executor.rs
+@@ -26,6 +26,38 @@
+         Self { env, output_printer, ready: Arc::new(Mutex::new(())) }
+     }
+ 
++    #[cfg(target_arch = "wasm64")]
++    fn prepare_std_command(
++        &self,
++        command_str: &str,
++        working_dir: &Path,
++        env_vars: Option<Vec<String>>,
++    ) -> std::process::Command {
++        let shell = self.env.shell.as_str();
++        let mut command = std::process::Command::new(shell);
++        command
++            .env("CLICOLOR_FORCE", "1")
++            .env("FORCE_COLOR", "true")
++            .env_remove("NO_COLOR")
++            .env("SBT_OPTS", "-Dsbt.color=always")
++            .env("JAVA_OPTS", "-Dsbt.color=always")
++            .env("GIT_CONFIG_PARAMETERS", "'color.ui=always'")
++            .env("GREP_OPTIONS", "--color=always")
++            .arg("-c")
++            .arg(command_str)
++            .current_dir(working_dir);
++        tracing::info!(command = command_str, "Executing command");
++        if let Some(env_vars) = env_vars {
++            for env_var in env_vars {
++                if let Ok(value) = std::env::var(&env_var) {
++                    command.env(&env_var, value);
++                }
++            }
++        }
++        command
++    }
++
++    #[cfg_attr(target_arch = "wasm64", allow(dead_code))]
+     fn prepare_command(
+         &self,
+         command_str: &str,
+@@ -98,6 +130,78 @@
+         silent: bool,
+         env_vars: Option<Vec<String>>,
+     ) -> anyhow::Result<CommandOutput> {
++        #[cfg(target_arch = "wasm64")]
++        {
++            let ready = self.ready.lock().await;
++            let mut std_cmd = self.prepare_std_command(&command, working_dir, env_vars);
++            std_cmd
++                .stdin(std::process::Stdio::null())
++                .stdout(std::process::Stdio::piped())
++                .stderr(std::process::Stdio::piped());
++
++            let out = tokio::task::spawn_blocking(move || -> io::Result<std::process::Output> {
++                use std::io::Read;
++                let mut child = std_cmd.spawn()?;
++                let mut child_out = child.stdout.take();
++                let mut child_err = child.stderr.take();
++                let (stdout_res, stderr_res) = std::thread::scope(|s| {
++                    let err_handle = s.spawn(move || -> io::Result<Vec<u8>> {
++                        let mut buf = Vec::new();
++                        if let Some(ref mut r) = child_err {
++                            r.read_to_end(&mut buf)?;
++                        }
++                        Ok(buf)
++                    });
++                    let mut out_buf = Vec::new();
++                    let out_res = if let Some(ref mut r) = child_out {
++                        r.read_to_end(&mut out_buf).map(|_| out_buf)
++                    } else {
++                        Ok(out_buf)
++                    };
++                    let err_res = err_handle.join().unwrap_or_else(|_| Ok(Vec::new()));
++                    (out_res, err_res)
++                });
++                let status = child.wait()?;
++                Ok(std::process::Output {
++                    status,
++                    stdout: stdout_res?,
++                    stderr: stderr_res?,
++                })
++            })
++            .await??;
++
++            if !silent {
++                if !out.stdout.is_empty() {
++                    let mut stdout_writer = OutputPrinterWriter::stdout(self.output_printer.clone());
++                    let pending = write_lossy_utf8(&mut stdout_writer, &out.stdout)?;
++                    if !pending.is_empty() {
++                        stdout_writer.write_all(pending.to_str_lossy().as_bytes())?;
++                    }
++                    if out.stdout.last() != Some(&b'\n') {
++                        stdout_writer.write_all(b"\n")?;
++                    }
++                    stdout_writer.flush()?;
++                }
++                if !out.stderr.is_empty() {
++                    let mut stderr_writer = OutputPrinterWriter::stderr(self.output_printer.clone());
++                    let pending = write_lossy_utf8(&mut stderr_writer, &out.stderr)?;
++                    if !pending.is_empty() {
++                        stderr_writer.write_all(pending.to_str_lossy().as_bytes())?;
++                    }
++                    stderr_writer.flush()?;
++                }
++            }
++            drop(ready);
++            return Ok(CommandOutput {
++                stdout: out.stdout.to_str_lossy().into_owned(),
++                stderr: out.stderr.to_str_lossy().into_owned(),
++                exit_code: out.status.code(),
++                command,
++            });
++        }
++
++        #[cfg(not(target_arch = "wasm64"))]
++        {
+         let ready = self.ready.lock().await;
+ 
+         let mut prepared_command = self.prepare_command(&command, working_dir, env_vars);
+@@ -147,6 +251,7 @@
+             exit_code: status.code(),
+             command,
+         })
++        }
+     }
+ }
+ 
+@@ -185,6 +290,7 @@
+ }
+ 
+ /// reads the output from A and writes it to W
++#[cfg_attr(target_arch = "wasm64", allow(dead_code))]
+ async fn stream<A: AsyncReadExt + Unpin, W: Write>(
+     io: &mut Option<A>,
+     mut writer: W,
+@@ -260,6 +366,18 @@
+         working_dir: PathBuf,
+         env_vars: Option<Vec<String>>,
+     ) -> anyhow::Result<std::process::ExitStatus> {
++        #[cfg(target_arch = "wasm64")]
++        {
++            let mut std_cmd = self.prepare_std_command(command, &working_dir, env_vars);
++            std_cmd
++                .stdin(std::process::Stdio::inherit())
++                .stdout(std::process::Stdio::inherit())
++                .stderr(std::process::Stdio::inherit());
++            return Ok(tokio::task::spawn_blocking(move || std_cmd.status()).await??);
++        }
++
++        #[cfg(not(target_arch = "wasm64"))]
++        {
+         let mut prepared_command = self.prepare_command(command, &working_dir, env_vars);
+ 
+         // overwrite the stdin, stdout and stderr to inherit
+@@ -269,6 +387,7 @@
+             .stderr(std::process::Stdio::inherit());
+ 
+         Ok(prepared_command.spawn()?.wait().await?)
++        }
+     }
+ }
+ 

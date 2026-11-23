@@ -1,0 +1,26 @@
+Index: crates/forge_walker/src/walker.rs
+--- crates/forge_walker/src/walker.rs.orig
++++ crates/forge_walker/src/walker.rs
+@@ -134,7 +134,8 @@
+         let skip_binary = self.skip_binary;
+ 
+         // TODO: Convert to async and return a stream
+-        let walk_parallel = WalkBuilder::new(&self.cwd)
++        let mut walk_builder = WalkBuilder::new(&self.cwd);
++        walk_builder
+             .standard_filters(true) // use standard ignore filters.
+             .hidden(self.hidden)
+             .require_git(false)
+@@ -145,8 +146,10 @@
+                 // Always exclude the `.git` directory, matching `fd --exclude
+                 // .git`.
+                 entry.file_name() != ".git"
+-            })
+-            .build_parallel();
++            });
++        #[cfg(target_arch = "wasm64")]
++        walk_builder.threads(1);
++        let walk_parallel = walk_builder.build_parallel();
+ 
+         walk_parallel.run(|| {
+             // Each thread gets its own clone of the shared state.
