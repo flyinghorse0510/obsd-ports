@@ -314,7 +314,7 @@ def is_source_file(arg: str) -> bool:
 def is_object_or_archive(arg: str) -> bool:
     if arg.startswith("-"):
         return False
-    if arg.endswith((".o", ".lo", ".a", ".so")):
+    if arg.endswith((".o", ".lo", ".a", ".rlib", ".so")):
         return True
     if ".so." in os.path.basename(arg):
         return True
@@ -323,7 +323,7 @@ def is_object_or_archive(arg: str) -> bool:
         try:
             with p.open("rb") as fp:
                 hdr = fp.read(8)
-            if hdr == b"\x00asm\x01\x00\x00\x00" or hdr.startswith(b"!<arch>\n"):
+            if hdr == b"\x00asm\x01\x00\x00\x00" or hdr.startswith((b"!<arch>\n", b"!<thin>\n")):
                 return True
         except OSError:
             pass
@@ -1132,6 +1132,25 @@ def run_cc_driver(argv: List[str], is_cxx: bool) -> int:
     if len(argv) == 1 and argv[0] == "-dumpmachine":
         print(f"aarch64-unknown-openbsd{ctx.openbsd_version}")
         return 0
+
+    # Strip foreign `--target=*` / `-target <triple>` flags added by `cc-rs` or build
+    # scripts when cross-compiling for `wasm64-unknown-openbsd` / `aarch64-unknown-openbsd*`.
+    cleaned_argv: List[str] = []
+    idx_t = 0
+    while idx_t < len(argv):
+        tok_t = argv[idx_t]
+        if tok_t in ("-target", "--target") and idx_t + 1 < len(argv):
+            idx_t += 2
+            continue
+        if tok_t.startswith(("--target=", "-target=")):
+            idx_t += 1
+            continue
+        cleaned_argv.append(tok_t)
+        idx_t += 1
+    argv = cleaned_argv
+
+    if not argv:
+        return subprocess.run([compiler_bin]).returncode
 
     # Pure info queries with no source/object inputs
     has_inputs = False

@@ -4,6 +4,7 @@ CACHE_ROOT ?= .cache
 CONFIG_ROOT := config
 VENDOR_ROOT := vendor
 PORTS_ROOT := ports
+EXTRA_ROOT := extra
 SDK_ROOT := sdk
 TARGETS_ROOT := targets
 TOOLS_ROOT := tools

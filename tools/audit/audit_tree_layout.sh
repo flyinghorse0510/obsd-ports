@@ -9,12 +9,15 @@ required_dirs=(
 	config/versions
 	config/matrix/backends
 	config/matrix/pals
+	config/extra
+	extra
 	mk/root
 	mk/config
 	mk/catalog
 	mk/rules
 	sdk/bin
 	sdk/lib
+	sdk/rust
 	sdk/autoconf
 	sdk/cmake
 	vendor/openbsd/versions/7.8/ports
@@ -22,10 +25,13 @@ required_dirs=(
 	vendor/openbsd/versions/8.0/ports
 	targets/emulate/emscripten
 	targets/emulate/darwin
+	targets/emulate/ios
 	targets/emulate/wasi
 	targets/translate/darwin
+	targets/translate/ios
 	targets/translate/linux
 	tools/vendor
+	tools/extra
 	tools/audit
 	tools/config
 	tools/testing
@@ -51,6 +57,8 @@ required_files=(
 	config/versions/7.9-catalog.tsv
 	config/versions/8.0-catalog.tsv
 	config/matrix/index.tsv
+	config/matrix/pals/ios.mk
+	config/extra/index.tsv
 	sdk/bin/obsd-cc
 	sdk/bin/obsd-c++
 	sdk/bin/obsd-ar
@@ -59,9 +67,16 @@ required_files=(
 	sdk/bin/obsd-nm
 	sdk/bin/obsd-strip
 	sdk/bin/obsd-pkg-config
+	sdk/bin/obsd-cargo
+	sdk/bin/obsd-rust-ld
+	sdk/rust/wasm64-unknown-openbsd.json
+	sdk/rust/obsd_rust.py
+	sdk/rust/unwind_stub.c
 	sdk/autoconf/config.site
 	sdk/cmake/openbsd-wasm64.cmake
 	tools/build_ports.py
+	tools/extra/gen_cargo_distinfo.py
+	tools/audit/audit_extra_ports.py
 	tools/vendor/sync_openbsd_ports.py
 	tools/vendor/import_port.py
 	tools/audit/vendor-baseline.tsv

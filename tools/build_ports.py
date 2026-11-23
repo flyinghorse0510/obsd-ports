@@ -2,24 +2,11 @@
 """
 build_ports.py -- Multi-axis OpenBSD Port Builder & Catalog Driver for `obsd-ports`.
 
-Commands:
-  - `list-catalog`: Search the full ~10,500+ OpenBSD release ports catalog
-    (`config/versions/<ver>-catalog.tsv`).
-  - `list`: List active port recipes under `ports/**`, topological build order,
-    vendor distinfo status, and build/applet status for the selected
-    `(OPENBSD_VERSION, COMPAT_BACKEND, COMPAT_PAL)` lane.
-  - `fetch`: Parse `vendor/openbsd/versions/<ver>/ports/<port>/distinfo`
-    (supporting OpenBSD's base64 SHA256 and hex SHA256 + SIZE), resolve upstream
-    `SITES` / `GH_*` / `network.conf` + OpenBSD distfiles mirrors, download into
-    `.cache/distfiles/`, and verify exact SHA256 & byte size.
-  - `build`: Extract distfiles into `build/openbsd/<ver>/<backend>/<pal>/work/<port>/`,
-    apply unmodified `vendor/.../patches/patch-*` (plus optional recipe
-    `ports/<port>/patches/patch-*`), cross-compile in topological dependency
-    order using `sdk/bin/obsd-*`, and stage into `stage/usr/local/...`.
-  - `package`: Invoke the target adapter (`targets/<backend>/<pal>/package_*.py`)
-    to produce localized WASM64 applet closures (`applets/<sym>.o`),
-    `ports-applets.tsv`, `sysroot/usr/local/...`, `ports.svfs.gz`,
-    `ports-owners.db`, and per-port `packages/<pkgname>.tgz`.
+Supports both `ports/**` (backed by immutable `vendor/openbsd/versions/<ver>/ports/`)
+and first-class `extra/**` (self-contained OpenBSD-style ports absent from official
+OpenBSD `7.8`/`7.9`/`8.0` release trees, including `MODULES = devel/cargo` via
+`sdk/bin/obsd-cargo`), parameterized across the 3D matrix
+`(OPENBSD_VERSION x COMPAT_BACKEND x COMPAT_PAL)`.
 """
 from __future__ import annotations
 
@@ -27,6 +14,8 @@ import argparse
 import base64
 import binascii
 import bz2
+import concurrent.futures
+import fcntl
 import gzip
 import hashlib
 import json
@@ -43,8 +32,9 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
+import time
 import tomllib
-import urllib.request
 import zipfile
 import zlib
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
@@ -56,6 +46,20 @@ DISTINFO_SIZE_RE = re.compile(r"^SIZE\s*\((.+)\)\s*=\s*(\d+)\s*$")
 VAR_ASSIGN_RE = re.compile(r"^([A-Za-z0-9_.+-]+?)\s*([+?:!]?=)\s*(.*)$")
 BRACED_VAR_RE = re.compile(r"\$\{([^{}]+)\}")
 SIMPLE_PAREN_OR_CHAR_VAR_RE = re.compile(r"\$\(([A-Za-z0-9_.+-]+)\)|\$([A-Za-z0-9_])")
+INCLUDE_QUOTED_RE = re.compile(r'^\.include\s+"([^"]+)"\s*$')
+CARGO_SEMVER_STEM_RE = re.compile(r"^([A-Za-z0-9_-]+?)-(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9._+-]+)?)$")
+
+OVERRIDE_TABLE_KEYS = ("versions", "backends", "pals", "targets", "matrix")
+
+DIST_TUPLE_SITES: Dict[str, Tuple[str, str]] = {
+    "github": ("https://github.com", "{acct}/{proj}/archive/{ref}/"),
+    "gitlab": ("https://gitlab.com", "{acct}/{proj}/-/archive/{ref}/"),
+    "codeberg": ("https://codeberg.org", "{acct}/{proj}/archive/{ref}/"),
+    "fdo": ("https://gitlab.freedesktop.org", "{acct}/{proj}/-/archive/{ref}/"),
+    "kde": ("https://invent.kde.org", "{acct}/{proj}/-/archive/{ref}/"),
+    "gnome": ("https://gitlab.gnome.org", "{acct}/{proj}/-/archive/{ref}/"),
+    "srht": ("https://git.sr.ht", "~{acct}/{proj}/archive/{ref}/"),
+}
 
 
 def die(msg: str, code: int = 1) -> "NoReturn":
@@ -90,7 +94,7 @@ def decode_openbsd_sha256(digest_str: str) -> str:
 
 def parse_distinfo(distinfo_path: pathlib.Path) -> List[Dict[str, Any]]:
     if not distinfo_path.is_file():
-        die(f"missing vendor distinfo: {distinfo_path}")
+        die(f"missing distinfo: {distinfo_path}")
     digests: Dict[str, str] = {}
     sizes: Dict[str, int] = {}
     order: List[str] = []
@@ -121,6 +125,40 @@ def parse_distinfo(distinfo_path: pathlib.Path) -> List[Dict[str, Any]]:
     return entries
 
 
+def _read_logical_makefile_lines(p: pathlib.Path, seen_files: Set[pathlib.Path]) -> List[str]:
+    rp = p.resolve()
+    if rp in seen_files or not p.is_file():
+        return []
+    seen_files.add(rp)
+
+    logical: List[str] = []
+    cur = ""
+    for raw in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        s = raw.rstrip()
+        if "#" in s:
+            idx = s.find("#")
+            if idx == 0 or s[idx - 1] != "\\":
+                s = s[:idx].rstrip()
+        if s.endswith("\\"):
+            cur += (" " if cur else "") + s[:-1].strip()
+        else:
+            cur += (" " if cur else "") + s.strip()
+            if cur:
+                m_inc = INCLUDE_QUOTED_RE.match(cur)
+                if m_inc:
+                    inc_rel = m_inc.group(1).strip()
+                    inc_path = (p.parent / inc_rel).resolve() if not os.path.isabs(inc_rel) else pathlib.Path(inc_rel)
+                    if inc_path.is_file():
+                        logical.extend(_read_logical_makefile_lines(inc_path, seen_files))
+                        cur = ""
+                        continue
+                logical.append(cur)
+            cur = ""
+    if cur:
+        logical.append(cur)
+    return logical
+
+
 def parse_openbsd_makefile_vars(paths: Sequence[pathlib.Path]) -> Dict[str, str]:
     env: Dict[str, str] = {
         "LOCALBASE": "/usr/local",
@@ -128,26 +166,11 @@ def parse_openbsd_makefile_vars(paths: Sequence[pathlib.Path]) -> Dict[str, str]
         "TRUEPREFIX": "/usr/local",
         "SYSCONFDIR": "/etc",
     }
+    seen_files: Set[pathlib.Path] = set()
     for p in paths:
         if not p.is_file():
             continue
-        logical: List[str] = []
-        cur = ""
-        for raw in p.read_text(encoding="utf-8", errors="replace").splitlines():
-            s = raw.rstrip()
-            if "#" in s:
-                idx = s.find("#")
-                if idx == 0 or s[idx - 1] != "\\":
-                    s = s[:idx].rstrip()
-            if s.endswith("\\"):
-                cur += (" " if cur else "") + s[:-1].strip()
-            else:
-                cur += (" " if cur else "") + s.strip()
-                if cur:
-                    logical.append(cur)
-                cur = ""
-        if cur:
-            logical.append(cur)
+        logical = _read_logical_makefile_lines(p, seen_files)
 
         def _unroll_for_loops(lines: Sequence[str], cur_env: Dict[str, str]) -> List[str]:
             out_lines: List[str] = []
@@ -197,7 +220,6 @@ def parse_openbsd_makefile_vars(paths: Sequence[pathlib.Path]) -> Dict[str, str]
             else:
                 env[k] = val
 
-            # Populate LIB<name>_VERSION from SHARED_LIBS += name ver
             if k == "SHARED_LIBS":
                 toks = env[k].split()
                 for idx in range(0, len(toks) - 1, 2):
@@ -303,7 +325,6 @@ def _apply_bmake_modifiers(val: str, mods_str: str) -> str:
                 cur = new_words[0] if "W" in flags else (" ".join(new_words) if cur.strip() else cur)
             continue
 
-        # Unknown modifier: skip to next ':' safely
         nxt = mods_str.find(":", pos)
         pos = nxt + 1 if nxt != -1 else n
     return cur
@@ -336,20 +357,112 @@ def expand_openbsd_expr(expr: str, env: Dict[str, str], depth: int = 0) -> str:
     return out
 
 
-def resolve_distfile_urls(
+def get_port_makefile_paths(
     vendor_ports_dir: pathlib.Path,
     vendor_port: str,
-    distfile_name: str,
-    extra_sites: Sequence[str],
-) -> List[str]:
-    mk_paths: List[pathlib.Path] = [vendor_ports_dir / "infrastructure/db/network.conf"]
+    port_dir: Optional[pathlib.Path] = None,
+    section: str = "ports",
+    include_network_conf: bool = True,
+) -> List[pathlib.Path]:
+    mk_paths: List[pathlib.Path] = []
+    if include_network_conf:
+        net_conf = vendor_ports_dir / "infrastructure/db/network.conf"
+        if net_conf.is_file():
+            mk_paths.append(net_conf)
+
+    if section == "extra":
+        if port_dir is not None:
+            mk_paths.append(port_dir / "Makefile")
+            # If crates.inc exists and was not already pulled via `.include "crates.inc"`, parse_openbsd_makefile_vars
+            # deduplicates via `seen_files`, so appending `crates.inc` is safely idempotent!
+            if (port_dir / "crates.inc").is_file():
+                mk_paths.append(port_dir / "crates.inc")
+        return mk_paths
+
     parts = vendor_port.split("/")
     for i in range(1, len(parts)):
         anc = "/".join(parts[:i])
         mk_paths.append(vendor_ports_dir / anc / "Makefile.inc")
     mk_paths.append(vendor_ports_dir / vendor_port / "Makefile")
+    if (vendor_ports_dir / vendor_port / "crates.inc").is_file():
+        mk_paths.append(vendor_ports_dir / vendor_port / "crates.inc")
+    return mk_paths
 
+
+def parse_modcargo_crates_map(env: Dict[str, str]) -> Dict[str, Tuple[str, str]]:
+    """Map `cargo/<crate>-<ver>.tar.gz` -> `(<crate>, <ver>)` from `MODCARGO_CRATES`."""
+    raw = expand_openbsd_expr(env.get("MODCARGO_CRATES", ""), env)
+    toks = raw.split()
+    subdir = expand_openbsd_expr(env.get("MODCARGO_DIST_SUBDIR", "cargo"), env).strip().strip("/")
+    prefix = f"{subdir}/" if subdir else ""
+    out: Dict[str, Tuple[str, str]] = {}
+    for i in range(0, len(toks) - 1, 2):
+        cname, cver = toks[i], toks[i + 1]
+        out[f"{prefix}{cname}-{cver}.tar.gz"] = (cname, cver)
+    return out
+
+
+def parse_dist_tuples(env: Dict[str, str]) -> List[Dict[str, str]]:
+    if "DIST_TUPLE" not in env:
+        return []
+    toks = expand_openbsd_expr(env["DIST_TUPLE"], env).split()
+    tuples: List[Dict[str, str]] = []
+    for idx in range(0, len(toks) - 4, 5):
+        tmpl, acct, proj, ref, targetdir = toks[idx : idx + 5]
+        ver_part = ref[1:] if (len(ref) > 1 and ref[0] in ("v", "V") and ref[1].isdigit()) else ref
+        tuples.append(
+            {
+                "template": tmpl,
+                "account": acct,
+                "project": proj,
+                "ref": ref,
+                "ver_part": ver_part,
+                "targetdir": targetdir,
+            }
+        )
+    return tuples
+
+
+def resolve_cargo_crate_pair(distfile_name: str, cargo_map: Dict[str, Tuple[str, str]]) -> Optional[Tuple[str, str]]:
+    if distfile_name in cargo_map:
+        return cargo_map[distfile_name]
+    if distfile_name.startswith("cargo/") and distfile_name.endswith(".tar.gz"):
+        stem = distfile_name[len("cargo/") : -len(".tar.gz")]
+        m = CARGO_SEMVER_STEM_RE.match(stem)
+        if m:
+            return m.group(1), m.group(2)
+    return None
+
+
+def resolve_distfile_urls(
+    vendor_ports_dir: pathlib.Path,
+    vendor_port: str,
+    distfile_name: str,
+    extra_sites: Sequence[str],
+    port_dir: Optional[pathlib.Path] = None,
+    section: str = "ports",
+) -> List[str]:
+    mk_paths = get_port_makefile_paths(
+        vendor_ports_dir,
+        vendor_port,
+        port_dir=port_dir,
+        section=section,
+        include_network_conf=True,
+    )
     env = parse_openbsd_makefile_vars(mk_paths)
+    cargo_map = parse_modcargo_crates_map(env)
+
+    # Fast-path Cargo `.crate` tarballs: resolve directly to static.crates.io + crates.io API + OpenBSD mirrors
+    cargo_pair = resolve_cargo_crate_pair(distfile_name, cargo_map)
+    if cargo_pair is not None:
+        cname, cver = cargo_pair
+        return [
+            f"https://static.crates.io/crates/{cname}/{cname}-{cver}.crate",
+            f"https://crates.io/api/v1/crates/{cname}/{cver}/download",
+            f"https://cdn.openbsd.org/pub/OpenBSD/distfiles/{distfile_name}",
+            f"https://ftp.openbsd.org/pub/OpenBSD/distfiles/{distfile_name}",
+        ]
+
     sites_raw = list(extra_sites)
     leaf = distfile_name.rsplit("/", 1)[-1]
 
@@ -377,23 +490,43 @@ def resolve_distfile_urls(
             expanded = expand_openbsd_expr(mk_val, env)
             sites_raw.extend(expanded.split())
 
+    # Match specific DIST_TUPLE entries before generic GitHub archive URLs
+    dt_entries = parse_dist_tuples(env)
+    matched_dt = False
+    for dt in dt_entries:
+        tmpl, acct, proj, ref, ver_part = dt["template"], dt["account"], dt["project"], dt["ref"], dt["ver_part"]
+        proj_tail = proj.rsplit("/", 1)[-1]
+        cand_leaves = {
+            f"{acct}-{proj_tail}-{ref}.tar.gz",
+            f"{acct}-{proj.replace('/', '-')}-{ref}.tar.gz",
+            f"{proj_tail}-{ver_part}.tar.gz",
+            f"{proj_tail}-{ref}.tar.gz",
+        }
+        if leaf in cand_leaves and tmpl in DIST_TUPLE_SITES:
+            host_base, path_tmpl = DIST_TUPLE_SITES[tmpl]
+            sites_raw.append(f"{host_base}/{path_tmpl.format(acct=acct, proj=proj, ref=ref)}")
+            if tmpl == "github":
+                sites_raw.append(f"https://github.com/{acct}/{proj}/releases/download/{ref}/")
+            matched_dt = True
+
     gh_acct = expand_openbsd_expr(env.get("GH_ACCOUNT", ""), env).strip()
     gh_proj = expand_openbsd_expr(env.get("GH_PROJECT", ""), env).strip()
     gh_tag = expand_openbsd_expr(env.get("GH_TAGNAME", ""), env).strip()
     gh_commit = expand_openbsd_expr(env.get("GH_COMMIT", ""), env).strip()
-    if gh_acct and gh_proj and (gh_tag or gh_commit):
+    if gh_acct and gh_proj and (gh_tag or gh_commit) and not matched_dt:
         ref = gh_commit or gh_tag
         sites_raw.append(f"https://github.com/{gh_acct}/{gh_proj}/archive/{ref}/")
         if gh_tag:
             sites_raw.append(f"https://github.com/{gh_acct}/{gh_proj}/releases/download/{gh_tag}/")
 
-    if "DIST_TUPLE" in env:
-        dt_toks = expand_openbsd_expr(env["DIST_TUPLE"], env).split()
-        for idx in range(0, len(dt_toks) - 4, 5):
-            tmpl, acct, proj, ref, _sub = dt_toks[idx : idx + 5]
-            if tmpl == "github":
-                sites_raw.append(f"https://github.com/{acct}/{proj}/archive/{ref}/")
-                sites_raw.append(f"https://github.com/{acct}/{proj}/releases/download/{ref}/")
+    if dt_entries and not matched_dt:
+        for dt in dt_entries:
+            tmpl, acct, proj, ref = dt["template"], dt["account"], dt["project"], dt["ref"]
+            if tmpl in DIST_TUPLE_SITES:
+                host_base, path_tmpl = DIST_TUPLE_SITES[tmpl]
+                sites_raw.append(f"{host_base}/{path_tmpl.format(acct=acct, proj=proj, ref=ref)}")
+                if tmpl == "github":
+                    sites_raw.append(f"https://github.com/{acct}/{proj}/releases/download/{ref}/")
 
     if expand_openbsd_expr(env.get("MODPY_PI", ""), env).strip().lower() == "yes":
         distname_val = expand_openbsd_expr(env.get("DISTNAME", ""), env).strip()
@@ -415,7 +548,6 @@ def resolve_distfile_urls(
             for pb in pypi_bases:
                 sites_raw.append(f"{pb.rstrip('/')}/{pi_dir}/")
 
-    # Always include official OpenBSD distfile mirrors as reliable fallback
     sites_raw.extend(
         [
             "https://cdn.openbsd.org/pub/OpenBSD/distfiles/",
@@ -457,10 +589,30 @@ def resolve_distfile_urls(
     return urls
 
 
+def _apply_override_layer(recipe: Dict[str, Any], layer: Any) -> None:
+    if not isinstance(layer, dict):
+        return
+    for k, v in layer.items():
+        if k == "env" and isinstance(v, dict):
+            merged_env = dict(recipe.get("env") or {})
+            merged_env.update(v)
+            recipe["env"] = merged_env
+        elif k.endswith("_append") and isinstance(v, list):
+            base_k = k[: -len("_append")]
+            cur_list = list(recipe.get(base_k) or [])
+            cur_list.extend(v)
+            recipe[base_k] = cur_list
+        else:
+            recipe[k] = v
+
+
 def load_recipe(
     port_dir: pathlib.Path,
     openbsd_version: str,
     ports_root: Optional[pathlib.Path] = None,
+    backend: str = "emulate",
+    pal: str = "emscripten",
+    section: str = "ports",
 ) -> Dict[str, Any]:
     toml_path = port_dir / "port.toml"
     json_path = port_dir / "port.json"
@@ -471,19 +623,54 @@ def load_recipe(
     else:
         die(f"missing port.toml or port.json in {port_dir}")
 
-    base_ports_root = ports_root or (REPO_ROOT / "ports")
+    base_ports_root = ports_root or (REPO_ROOT / ("extra" if section == "extra" else "ports"))
     rel_port = port_dir.relative_to(base_ports_root).as_posix()
+
     recipe = dict(raw)
-    ver_overrides = recipe.pop("versions", {}).get(openbsd_version, {})
-    if isinstance(ver_overrides, dict):
-        for k, v in ver_overrides.items():
-            recipe[k] = v
+    versions_tbl = recipe.pop("versions", {})
+    backends_tbl = recipe.pop("backends", {})
+    pals_tbl = recipe.pop("pals", {})
+    targets_tbl = recipe.pop("targets", {})
+    matrix_tbl = recipe.pop("matrix", {})
+
+    # Deterministic 6-layer override resolution:
+    #   1. base -> 2. [versions."<ver>"] -> 3. [backends."<backend>"] ->
+    #   4. [pals."<pal>"] -> 5. [targets."<backend>/<pal>"] ->
+    #   6. [matrix."<ver>/<backend>/<pal>"]
+    if isinstance(versions_tbl, dict):
+        _apply_override_layer(recipe, versions_tbl.get(openbsd_version))
+    if isinstance(backends_tbl, dict):
+        _apply_override_layer(recipe, backends_tbl.get(backend))
+    if isinstance(pals_tbl, dict):
+        _apply_override_layer(recipe, pals_tbl.get(pal))
+    if isinstance(targets_tbl, dict):
+        _apply_override_layer(recipe, targets_tbl.get(f"{backend}/{pal}"))
+    if isinstance(matrix_tbl, dict):
+        _apply_override_layer(recipe, matrix_tbl.get(f"{openbsd_version}/{backend}/{pal}"))
+
+    # Strip any nested override tables if accidentally placed inside an override block
+    for ov_k in OVERRIDE_TABLE_KEYS:
+        recipe.pop(ov_k, None)
 
     recipe["port"] = recipe.get("port", rel_port)
     recipe["vendor_port"] = recipe.get("vendor_port", recipe["port"])
     recipe["port_dir"] = port_dir
-    if "only_versions" in recipe and recipe["only_versions"] is not None:
-        recipe["only_versions"] = [str(v).strip() for v in recipe["only_versions"]]
+    recipe["section"] = section
+
+    for gate_k in (
+        "only_versions",
+        "only_for_versions",
+        "not_for_versions",
+        "only_for_backends",
+        "not_for_backends",
+        "only_for_pals",
+        "not_for_pals",
+        "only_for_targets",
+        "not_for_targets",
+    ):
+        if gate_k in recipe and recipe[gate_k] is not None:
+            recipe[gate_k] = [str(x).strip() for x in recipe[gate_k]]
+
     recipe.setdefault("depends", [])
     recipe.setdefault("build_style", "gnu")
     recipe.setdefault("separate_build", False)
@@ -496,68 +683,167 @@ def load_recipe(
     return recipe
 
 
+def recipe_supports_lane(
+    recipe: Dict[str, Any],
+    openbsd_version: str,
+    backend: str = "emulate",
+    pal: str = "emscripten",
+) -> Tuple[bool, str]:
+    target_cell = f"{backend}/{pal}"
+
+    only_vers = recipe.get("only_for_versions")
+    if only_vers is None:
+        only_vers = recipe.get("only_versions")
+    if only_vers is not None and openbsd_version not in [str(v).strip() for v in only_vers]:
+        return False, f"only_for_versions={only_vers} (current: {openbsd_version})"
+
+    not_vers = recipe.get("not_for_versions")
+    if not_vers is not None and openbsd_version in [str(v).strip() for v in not_vers]:
+        return False, f"not_for_versions={not_vers} (current: {openbsd_version})"
+
+    only_backends = recipe.get("only_for_backends")
+    if only_backends is not None and backend not in [str(x).strip() for x in only_backends]:
+        return False, f"only_for_backends={only_backends} (current: {backend})"
+
+    not_backends = recipe.get("not_for_backends")
+    if not_backends is not None and backend in [str(x).strip() for x in not_backends]:
+        return False, f"not_for_backends={not_backends} (current: {backend})"
+
+    only_pals = recipe.get("only_for_pals")
+    if only_pals is not None and pal not in [str(x).strip() for x in only_pals]:
+        return False, f"only_for_pals={only_pals} (current: {pal})"
+
+    not_pals = recipe.get("not_for_pals")
+    if not_pals is not None and pal in [str(x).strip() for x in not_pals]:
+        return False, f"not_for_pals={not_pals} (current: {pal})"
+
+    only_targets = recipe.get("only_for_targets")
+    if only_targets is not None and target_cell not in [str(x).strip() for x in only_targets]:
+        return False, f"only_for_targets={only_targets} (current: {target_cell})"
+
+    not_targets = recipe.get("not_for_targets")
+    if not_targets is not None and target_cell in [str(x).strip() for x in not_targets]:
+        return False, f"not_for_targets={not_targets} (current: {target_cell})"
+
+    return True, ""
+
+
 def recipe_supports_version(recipe: Dict[str, Any], openbsd_version: str) -> bool:
-    only_versions = recipe.get("only_versions")
-    if only_versions is not None:
-        return openbsd_version in [str(v).strip() for v in only_versions]
-    return True
+    ok, _ = recipe_supports_lane(recipe, openbsd_version)
+    return ok
 
 
 def discover_recipes(
     openbsd_version: str,
     target_ports: Optional[Sequence[str]] = None,
     ports_root: Optional[pathlib.Path] = None,
+    backend: str = "emulate",
+    pal: str = "emscripten",
+    section: str = "all",
+    extra_root: Optional[pathlib.Path] = None,
+    include_cross_section_deps: bool = True,
 ) -> List[Dict[str, Any]]:
-    ports_root = ports_root or (REPO_ROOT / "ports")
-    if not ports_root.is_dir():
-        return []
+    if section not in ("all", "ports", "extra"):
+        die(f"invalid --section '{section}' (expected: all, ports, extra)")
+
+    custom_single_root = ports_root is not None and extra_root is None
+    p_root = ports_root or (REPO_ROOT / "ports")
+    e_root = extra_root or (REPO_ROOT / "extra")
 
     raw_map: Dict[str, Dict[str, Any]] = {}
     all_map: Dict[str, Dict[str, Any]] = {}
-    for p in sorted(ports_root.rglob("port.toml")) + sorted(ports_root.rglob("port.json")):
-        port_dir = p.parent
-        rel = port_dir.relative_to(ports_root).as_posix()
-        if rel not in raw_map:
-            rec = load_recipe(port_dir, openbsd_version, ports_root=ports_root)
+    gate_reasons: Dict[str, str] = {}
+
+    def _scan_section_root(root_dir: pathlib.Path, sec_name: str) -> None:
+        if not root_dir.is_dir():
+            return
+        for p in sorted(root_dir.rglob("port.toml")) + sorted(root_dir.rglob("port.json")):
+            port_dir = p.parent
+            rel = port_dir.relative_to(root_dir).as_posix()
+            if rel in raw_map:
+                prev_sec = raw_map[rel].get("section", sec_name)
+                if prev_sec != sec_name:
+                    die(f"duplicate port '{rel}' declared in both {prev_sec}/ and {sec_name}/")
+                continue
+            rec = load_recipe(
+                port_dir,
+                openbsd_version,
+                ports_root=root_dir,
+                backend=backend,
+                pal=pal,
+                section=sec_name,
+            )
             raw_map[rel] = rec
-            if recipe_supports_version(rec, openbsd_version):
+            ok, reason = recipe_supports_lane(rec, openbsd_version, backend=backend, pal=pal)
+            if ok:
                 all_map[rel] = rec
+            else:
+                gate_reasons[rel] = reason
+
+    if custom_single_root:
+        _scan_section_root(p_root, "ports" if section == "all" else section)
+    else:
+        _scan_section_root(p_root, "ports")
+        _scan_section_root(e_root, "extra")
+
+    if not raw_map:
+        return []
+
+    def _matches_section(rec: Dict[str, Any]) -> bool:
+        return section == "all" or rec.get("section") == section
 
     if target_ports:
         wanted: Set[str] = set()
 
         def add_with_deps(name: str, required_by: Optional[str] = None) -> None:
             norm = name.strip().strip("/")
+            explicit_sec: Optional[str] = None
             if norm.startswith("ports/"):
+                explicit_sec = "ports"
                 norm = norm[len("ports/") :]
+            elif norm.startswith("extra/"):
+                explicit_sec = "extra"
+                norm = norm[len("extra/") :]
+
             if norm not in raw_map:
-                die(f"port recipe '{norm}' not found under ports/ (available: {', '.join(sorted(raw_map)) or 'none'})")
+                die(
+                    f"port recipe '{norm}' not found under ports/ or extra/ "
+                    f"(available: {', '.join(sorted(raw_map)) or 'none'})"
+                )
+            rec_raw = raw_map[norm]
+            if explicit_sec is not None and rec_raw.get("section") != explicit_sec:
+                die(f"port '{norm}' lives under {rec_raw.get('section')}/, not {explicit_sec}/")
+            if required_by is None and section != "all" and rec_raw.get("section") != section:
+                die(
+                    f"port '{norm}' belongs to section '{rec_raw.get('section')}', "
+                    f"but --section '{section}' was requested"
+                )
+            if required_by is not None and section == "ports" and rec_raw.get("section") == "extra":
+                die(f"ports/ recipe '{required_by}' cannot depend on extra/ recipe '{norm}'")
+
             if norm not in all_map:
                 if required_by is not None:
-                    die(
-                        f"port '{required_by}' depends on '{norm}', which is restricted to "
-                        f"only_versions={raw_map[norm].get('only_versions')} (current: {openbsd_version})"
-                    )
+                    die(f"port '{required_by}' depends on '{norm}', which is gated out: {gate_reasons.get(norm, '')}")
                 return
             if norm in wanted:
                 return
             wanted.add(norm)
-            for dep in all_map[norm].get("depends", []):
-                add_with_deps(dep, required_by=norm)
+            if include_cross_section_deps:
+                for dep in all_map[norm].get("depends", []):
+                    add_with_deps(dep, required_by=norm)
 
         for tp in target_ports:
             for item in tp.split(","):
                 if item.strip():
                     add_with_deps(item)
     else:
-        wanted = set(all_map.keys())
+        wanted = {k for k, r in all_map.items() if _matches_section(r)}
 
-    # Topological sort
     ordered: List[Dict[str, Any]] = []
     visiting: Set[str] = set()
     visited: Set[str] = set()
 
-    def visit(name: str) -> None:
+    def visit(name: str, required_by: Optional[str] = None) -> None:
         if name in visited:
             return
         if name in visiting:
@@ -566,13 +852,14 @@ def discover_recipes(
         rec = all_map.get(name)
         if rec is None:
             if name in raw_map:
-                die(
-                    f"dependency port '{name}' is restricted to "
-                    f"only_versions={raw_map[name].get('only_versions')} (current: {openbsd_version})"
-                )
-            die(f"missing dependency port recipe 'ports/{name}/port.toml'")
+                die(f"dependency port '{name}' is gated out: {gate_reasons.get(name, '')}")
+            die(f"missing dependency port recipe '{name}' (searched ports/ and extra/)")
+        if required_by is not None and raw_map[required_by].get("section") == "ports" and rec.get("section") == "extra":
+            die(f"ports/ recipe '{required_by}' cannot depend on extra/ recipe '{name}'")
         for dep in rec.get("depends", []):
-            visit(dep)
+            if not include_cross_section_deps and dep in all_map and not _matches_section(all_map[dep]):
+                continue
+            visit(dep, required_by=name)
         visiting.remove(name)
         visited.add(name)
         ordered.append(rec)
@@ -589,80 +876,175 @@ def is_skipped_distfile(filename: str, skip_set: Set[str]) -> bool:
     return filename in skip_set or leaf in skip_set
 
 
+def _download_and_verify_one_distfile(
+    ent: Dict[str, Any],
+    dest: pathlib.Path,
+    urls: Sequence[str],
+    openbsd_version: str,
+    port_name: str,
+) -> Tuple[pathlib.Path, Dict[str, Any]]:
+    fn = ent["filename"]
+    expected_sha = ent["sha256"]
+    expected_sz = ent["size"]
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    if dest.is_file():
+        actual_sz = dest.stat().st_size
+        if expected_sz is None or actual_sz == expected_sz:
+            if sha256_file(dest) == expected_sha:
+                return dest, ent
+
+    lock_path = dest.parent / f".{dest.name}.lock"
+    with lock_path.open("w") as lock_fp:
+        fcntl.flock(lock_fp.fileno(), fcntl.LOCK_EX)
+        if dest.is_file():
+            actual_sz = dest.stat().st_size
+            if (expected_sz is None or actual_sz == expected_sz) and sha256_file(dest) == expected_sha:
+                return dest, ent
+            dest.unlink(missing_ok=True)
+
+        part = dest.parent / f".{dest.name}.{os.getpid()}.{threading.get_ident()}.part"
+        last_err = "no candidate URLs"
+        try:
+            for url in urls:
+                for attempt in range(3):
+                    if attempt > 0:
+                        time.sleep(0.5 * (2 ** (attempt - 1)))
+                    if not fn.startswith("cargo/") or attempt > 0:
+                        print(f"[fetch/{openbsd_version}] {port_name}: {url}")
+                    part.unlink(missing_ok=True)
+                    proc = subprocess.run(
+                        [
+                            "curl",
+                            "-fL",
+                            "--connect-timeout",
+                            "15",
+                            "--max-time",
+                            "600",
+                            "--retry",
+                            "2",
+                            "-sS",
+                            "-o",
+                            str(part),
+                            url,
+                        ],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                    )
+                    if proc.returncode != 0 or not part.is_file():
+                        last_err = proc.stderr.strip() or f"curl exit {proc.returncode}"
+                        # 404 (curl exit 22 with 404) moves straight to fallback URL; transient errors retry
+                        if "404" in last_err:
+                            break
+                        continue
+                    actual_sz = part.stat().st_size
+                    if expected_sz is not None and actual_sz != expected_sz:
+                        last_err = f"size mismatch from {url}: got {actual_sz}, expected {expected_sz}"
+                        part.unlink(missing_ok=True)
+                        break
+                    actual_sha = sha256_file(part)
+                    if actual_sha != expected_sha:
+                        last_err = f"SHA256 mismatch from {url}: got {actual_sha}, expected {expected_sha}"
+                        part.unlink(missing_ok=True)
+                        break
+                    part.replace(dest)
+                    if not fn.startswith("cargo/"):
+                        print(f"[fetch/{openbsd_version}] verified {fn} (sha256={actual_sha[:16]}..., {actual_sz} bytes)")
+                    return dest, ent
+        finally:
+            part.unlink(missing_ok=True)
+
+    die(f"failed to fetch & verify distfile '{fn}' for {port_name}: {last_err}")
+
+
 def fetch_port_distfiles(
     recipe: Dict[str, Any],
     openbsd_version: str,
     repo_root: Optional[pathlib.Path] = None,
+    jobs: int = 16,
 ) -> List[Tuple[pathlib.Path, Dict[str, Any]]]:
     root = repo_root or REPO_ROOT
+    section = recipe.get("section", "ports")
     vendor_ports_dir = root / "vendor/openbsd/versions" / openbsd_version / "ports"
     vport = recipe["vendor_port"]
-    vdir = vendor_ports_dir / vport
-    if not vdir.is_dir():
-        die(
-            f"port '{recipe['port']}' has no vendored OpenBSD {openbsd_version} subtree at {vdir}; "
-            f"run `make import PORT={vport}` first"
-        )
+    port_dir: pathlib.Path = recipe["port_dir"]
 
-    entries = parse_distinfo(vdir / "distinfo")
+    if section == "extra":
+        meta_dir = port_dir
+        if not (meta_dir / "distinfo").is_file():
+            die(f"extra port '{recipe['port']}' is missing {meta_dir / 'distinfo'}")
+    else:
+        meta_dir = vendor_ports_dir / vport
+        if not meta_dir.is_dir():
+            die(
+                f"port '{recipe['port']}' has no vendored OpenBSD {openbsd_version} subtree at {meta_dir}; "
+                f"run `make import PORT={vport}` first"
+            )
+
+    entries = parse_distinfo(meta_dir / "distinfo")
     skip_set = {str(x) for x in recipe.get("skip_distfiles", [])}
     cache_dist = root / ".cache/distfiles"
     extra_sites = recipe.get("sites", [])
-    fetched: List[Tuple[pathlib.Path, Dict[str, Any]]] = []
 
-    for ent in entries:
-        fn = ent["filename"]
-        if is_skipped_distfile(fn, skip_set):
-            continue
-        expected_sha = ent["sha256"]
-        expected_sz = ent["size"]
-        dest = cache_dist / fn
-        dest.parent.mkdir(parents=True, exist_ok=True)
+    active_entries = [ent for ent in entries if not is_skipped_distfile(ent["filename"], skip_set)]
+    if not active_entries:
+        return []
 
+    # Fast check for already-verified local files, and parallel download for any missing/stale files
+    to_fetch_indices: List[int] = []
+    results: List[Optional[Tuple[pathlib.Path, Dict[str, Any]]]] = [None] * len(active_entries)
+
+    for idx, ent in enumerate(active_entries):
+        dest = cache_dist / ent["filename"]
         if dest.is_file():
-            actual_sz = dest.stat().st_size
-            actual_sha = sha256_file(dest)
-            if actual_sha == expected_sha and (expected_sz is None or actual_sz == expected_sz):
-                fetched.append((dest, ent))
-                continue
-            dest.unlink()
+            exp_sz = ent["size"]
+            if exp_sz is None or dest.stat().st_size == exp_sz:
+                if sha256_file(dest) == ent["sha256"]:
+                    results[idx] = (dest, ent)
+                    continue
+        to_fetch_indices.append(idx)
 
-        urls = resolve_distfile_urls(vendor_ports_dir, vport, fn, extra_sites)
-        part = dest.with_suffix(dest.suffix + ".part")
-        last_err = "no candidate URLs"
-        ok = False
-        for url in urls:
-            print(f"[fetch/{openbsd_version}] {recipe['port']}: {url}")
-            part.unlink(missing_ok=True)
-            proc = subprocess.run(
-                ["curl", "-fL", "--connect-timeout", "15", "--retry", "2", "-sS", "-o", str(part), url],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
+    if to_fetch_indices:
+        if len(to_fetch_indices) > 1:
+            print(
+                f"[fetch/{openbsd_version}] {recipe['port']}: downloading {len(to_fetch_indices)} distfile(s) "
+                f"with {min(max(jobs, 4), 24, len(to_fetch_indices))} parallel worker(s)..."
             )
-            if proc.returncode != 0 or not part.is_file():
-                last_err = proc.stderr.strip() or f"curl exit {proc.returncode}"
-                continue
-            actual_sz = part.stat().st_size
-            actual_sha = sha256_file(part)
-            if expected_sz is not None and actual_sz != expected_sz:
-                last_err = f"size mismatch from {url}: got {actual_sz}, expected {expected_sz}"
-                part.unlink(missing_ok=True)
-                continue
-            if actual_sha != expected_sha:
-                last_err = f"SHA256 mismatch from {url}: got {actual_sha}, expected {expected_sha}"
-                part.unlink(missing_ok=True)
-                continue
-            part.replace(dest)
-            print(f"[fetch/{openbsd_version}] verified {fn} (sha256={actual_sha[:16]}..., {actual_sz} bytes)")
-            ok = True
-            break
+        url_cache: Dict[int, List[str]] = {}
+        for idx in to_fetch_indices:
+            ent = active_entries[idx]
+            url_cache[idx] = resolve_distfile_urls(
+                vendor_ports_dir,
+                vport,
+                ent["filename"],
+                extra_sites,
+                port_dir=port_dir,
+                section=section,
+            )
 
-        if not ok:
-            die(f"failed to fetch & verify distfile '{fn}' for {recipe['port']}: {last_err}")
-        fetched.append((dest, ent))
+        workers = min(max(jobs, 4), 24, len(to_fetch_indices))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            fut_map = {
+                pool.submit(
+                    _download_and_verify_one_distfile,
+                    active_entries[idx],
+                    cache_dist / active_entries[idx]["filename"],
+                    url_cache[idx],
+                    openbsd_version,
+                    recipe["port"],
+                ): idx
+                for idx in to_fetch_indices
+            }
+            for fut in concurrent.futures.as_completed(fut_map):
+                idx = fut_map[fut]
+                results[idx] = fut.result()
 
-    return fetched
+        cargo_fetched = sum(1 for idx in to_fetch_indices if active_entries[idx]["filename"].startswith("cargo/"))
+        if cargo_fetched:
+            print(f"[fetch/{openbsd_version}] {recipe['port']}: verified {cargo_fetched} cargo crate archive(s)")
+
+    return [r for r in results if r is not None]
 
 
 def decompress_lzip_stream(src_path: pathlib.Path, dst_fp: Any) -> None:
@@ -766,7 +1148,7 @@ def extract_archive(archive_path: pathlib.Path, extract_root: pathlib.Path) -> N
                     out_p.chmod(unix_mode)
         return
 
-    if name.endswith((".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar")):
+    if name.endswith((".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar", ".crate")):
         with tarfile.open(archive_path, "r:*") as tf:
             tf.extractall(path=extract_root, filter="data")
         return
@@ -901,19 +1283,68 @@ def apply_patch_dir(patch_dir: pathlib.Path, wrksrc: pathlib.Path, strip_level: 
             )
 
 
-def get_port_pkgname(vendor_ports_dir: pathlib.Path, vendor_port: str) -> str:
-    mk_paths: List[pathlib.Path] = []
-    parts = vendor_port.split("/")
-    for i in range(1, len(parts)):
-        mk_paths.append(vendor_ports_dir / "/".join(parts[:i]) / "Makefile.inc")
-    mk_paths.append(vendor_ports_dir / vendor_port / "Makefile")
+def get_port_pkgname(
+    vendor_ports_dir: pathlib.Path,
+    vendor_port: str,
+    port_dir: Optional[pathlib.Path] = None,
+    section: str = "ports",
+) -> str:
+    mk_paths = get_port_makefile_paths(
+        vendor_ports_dir,
+        vendor_port,
+        port_dir=port_dir,
+        section=section,
+        include_network_conf=False,
+    )
     env = parse_openbsd_makefile_vars(mk_paths)
+    parts = vendor_port.split("/")
     distname = expand_openbsd_expr(env.get("DISTNAME", ""), env).strip()
     raw_pkg = env.get("PKGNAME", env.get("PKGNAME-main", distname or parts[-1]))
     pkgname = expand_openbsd_expr(raw_pkg, env).strip()
     if not pkgname or "$" in pkgname or "/" in pkgname:
         pkgname = distname if (distname and "$" not in distname and "/" not in distname) else parts[-1]
     return pkgname
+
+
+def get_port_comment_and_descr(
+    vendor_ports_dir: pathlib.Path,
+    vendor_port: str,
+    port_dir: pathlib.Path,
+    section: str,
+) -> Tuple[str, str]:
+    meta_dir = port_dir if section == "extra" else (vendor_ports_dir / vendor_port)
+    mk_paths = get_port_makefile_paths(
+        vendor_ports_dir,
+        vendor_port,
+        port_dir=port_dir,
+        section=section,
+        include_network_conf=False,
+    )
+    env = parse_openbsd_makefile_vars(mk_paths)
+    comment = expand_openbsd_expr(env.get("COMMENT", env.get("COMMENT-main", "")), env).strip()
+    descr_path = meta_dir / "pkg/DESCR"
+    if not descr_path.is_file():
+        descr_path = meta_dir / "pkg/DESCR-main"
+    descr = descr_path.read_text(encoding="utf-8", errors="replace").strip() if descr_path.is_file() else ""
+    return comment, descr
+
+
+def parse_plist_bins(meta_dir: pathlib.Path) -> List[str]:
+    plist = meta_dir / "pkg/PLIST"
+    if not plist.is_file():
+        return []
+    bins: List[str] = []
+    for raw in plist.read_text(encoding="utf-8", errors="replace").splitlines():
+        s = raw.strip()
+        if s.startswith("@bin bin/"):
+            b = s[len("@bin bin/") :].strip()
+            if b and "/" not in b:
+                bins.append(b)
+        elif s.startswith("bin/"):
+            b = s[len("bin/") :].strip()
+            if b and "/" not in b:
+                bins.append(b)
+    return bins
 
 
 def make_sdk_env(
@@ -948,6 +1379,7 @@ def make_sdk_env(
     strip_bin = str(sdk_bin / "obsd-strip")
     pkg_cfg = str(sdk_bin / "obsd-pkg-config")
     install_bin = str(sdk_bin / "obsd-install")
+    cargo_bin = str(sdk_bin / "obsd-cargo")
     config_site = str(REPO_ROOT / "sdk/autoconf/config.site")
     cmake_tc = str(REPO_ROOT / "sdk/cmake/openbsd-wasm64.cmake")
 
@@ -961,6 +1393,7 @@ def make_sdk_env(
     env["NM"] = nm
     env["STRIP"] = strip_bin
     env["PKG_CONFIG"] = pkg_cfg
+    env["CARGO"] = cargo_bin
     env["INSTALL"] = install_bin
     env["INSTALL_PROGRAM"] = f"{install_bin} -c -m 0755"
     env["INSTALL_SCRIPT"] = f"{install_bin} -c -m 0755"
@@ -970,7 +1403,6 @@ def make_sdk_env(
     env["CONFIG_SITE"] = config_site
     env["CMAKE_TOOLCHAIN_FILE"] = cmake_tc
 
-    # Host C compiler for ports whose Makefile compiles build-time code generators (CC_FOR_BUILD / HOSTCC)
     host_cc = shutil.which("clang") or shutil.which("gcc") or shutil.which("cc") or "cc"
     env["CC_FOR_BUILD"] = host_cc
     env["BUILD_CC"] = host_cc
@@ -1000,7 +1432,18 @@ def make_sdk_env(
     env["VENDOR_PORT_DIR"] = str(vendor_port_dir)
     env["JOBS"] = str(jobs)
 
-    # Export OpenBSD SHARED_LIBS versions (`LIBbz2_VERSION`, `LIBlua5.4_VERSION`, etc.)
+    if recipe.get("skip_distfiles"):
+        env["OBSD_SKIP_DISTFILES_JSON"] = json.dumps([str(x) for x in recipe["skip_distfiles"]])
+    if recipe.get("cargo_patch_crates"):
+        env["OBSD_CARGO_PATCH_CRATES_JSON"] = json.dumps(recipe["cargo_patch_crates"])
+
+    rustflags_list = list(recipe.get("cargo_rustflags", []))
+    mk_rf = expand_openbsd_expr(vendor_env.get("MODCARGO_RUSTFLAGS", ""), vendor_env).strip()
+    if mk_rf:
+        rustflags_list.append(mk_rf)
+    if rustflags_list:
+        env["MODCARGO_RUSTFLAGS"] = " ".join(str(x) for x in rustflags_list).strip()
+
     for k, v in vendor_env.items():
         if k.startswith("LIB") and k.endswith("_VERSION"):
             env.setdefault(k, v)
@@ -1036,6 +1479,40 @@ def snapshot_tree(root: pathlib.Path) -> Dict[str, Tuple[int, int]]:
     return snap
 
 
+def _extract_cargo_crates_parallel(
+    cargo_archives: Sequence[Tuple[str, pathlib.Path, str]],
+    vendor_dir: pathlib.Path,
+    jobs: int,
+) -> None:
+    if not cargo_archives:
+        return
+    vendor_dir.mkdir(parents=True, exist_ok=True)
+
+    def _one(item: Tuple[str, pathlib.Path, str]) -> None:
+        stem, ar_path, sha_hex = item
+        dest = vendor_dir / stem
+        tmp_p = vendor_dir / f".tmp-{stem}.{os.getpid()}"
+        shutil.rmtree(tmp_p, ignore_errors=True)
+        tmp_p.mkdir(parents=True, exist_ok=True)
+        try:
+            with tarfile.open(ar_path, "r:*") as tf:
+                tf.extractall(path=tmp_p, filter="data")
+            subs = [p for p in tmp_p.iterdir() if p.is_dir()]
+            src_d = subs[0] if len(subs) == 1 else tmp_p
+            shutil.rmtree(dest, ignore_errors=True)
+            shutil.move(str(src_d), str(dest))
+            (dest / ".cargo-checksum.json").write_text(
+                json.dumps({"files": {}, "package": sha_hex}) + "\n",
+                encoding="utf-8",
+            )
+        finally:
+            shutil.rmtree(tmp_p, ignore_errors=True)
+
+    workers = min(max(jobs, 4), 24, len(cargo_archives))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        list(pool.map(_one, cargo_archives))
+
+
 def build_single_port(
     recipe: Dict[str, Any],
     openbsd_version: str,
@@ -1048,11 +1525,18 @@ def build_single_port(
     repo_root: Optional[pathlib.Path] = None,
 ) -> Dict[str, Any]:
     root = repo_root or REPO_ROOT
+    section = recipe.get("section", "ports")
     port_name = recipe["port"]
     vport = recipe["vendor_port"]
+    port_dir: pathlib.Path = recipe["port_dir"]
     vendor_ports_dir = root / "vendor/openbsd/versions" / openbsd_version / "ports"
-    vendor_port_dir = vendor_ports_dir / vport
-    pkgname = recipe.get("pkgname") or get_port_pkgname(vendor_ports_dir, vport)
+    vendor_port_dir = port_dir if section == "extra" else (vendor_ports_dir / vport)
+    pkgname = recipe.get("pkgname") or get_port_pkgname(
+        vendor_ports_dir,
+        vport,
+        port_dir=port_dir,
+        section=section,
+    )
 
     stage_dir = lane_dir / "stage"
     stage_dir.mkdir(parents=True, exist_ok=True)
@@ -1064,49 +1548,75 @@ def build_single_port(
     stamp_slug = port_name.replace("/", "__")
     stamp_file = stamps_dir / f"{stamp_slug}.json"
 
-    fetched = fetch_port_distfiles(recipe, openbsd_version, repo_root=root)
+    fetched = fetch_port_distfiles(recipe, openbsd_version, repo_root=root, jobs=jobs)
 
-    # Compute deterministic recipe + vendor + distfile build signature
-    # (exclude absolute `port_dir` Path so `.stamps/*.json` remain portable across checkouts/submodules)
+    # Compute deterministic recipe + metadata + distfile build signature.
+    # For `section == "ports"`, omit `"section"` from `sig_recipe` so all pre-existing
+    # `ports/*` stamps maintain 100% identical signatures without unnecessary rebuilds.
     sig_h = hashlib.sha256()
-    sig_recipe = {k: v for k, v in recipe.items() if k != "port_dir"}
+    excluded_sig_keys = {"port_dir"} | ({"section"} if section == "ports" else set())
+    sig_recipe = {k: v for k, v in recipe.items() if k not in excluded_sig_keys}
     sig_h.update(json.dumps(sig_recipe, default=str, sort_keys=True).encode("utf-8"))
-    for vf in sorted(vendor_port_dir.rglob("*")):
-        if vf.is_file():
-            sig_h.update(vf.relative_to(vendor_port_dir).as_posix().encode())
-            sig_h.update(sha256_file(vf).encode())
-    port_dir: pathlib.Path = recipe["port_dir"]
+    if section != "extra" and vendor_port_dir.is_dir():
+        for vf in sorted(vendor_port_dir.rglob("*")):
+            if vf.is_file():
+                sig_h.update(vf.relative_to(vendor_port_dir).as_posix().encode())
+                sig_h.update(sha256_file(vf).encode())
     for pf in sorted(port_dir.rglob("*")):
         if pf.is_file():
             sig_h.update(pf.relative_to(port_dir).as_posix().encode())
             sig_h.update(sha256_file(pf).encode())
-    for df_path, df_ent in fetched:
+    for _df_path, df_ent in fetched:
         sig_h.update(df_ent["sha256"].encode())
     build_sig = sig_h.hexdigest()
 
     if not force and stamp_file.is_file():
         old = json.loads(stamp_file.read_text(encoding="utf-8"))
         if old.get("signature") == build_sig:
-            all_present = all((stage_dir / rel).exists() or (stage_dir / rel).is_symlink() for rel in old.get("installed_files", []))
+            all_present = all(
+                (stage_dir / rel).exists() or (stage_dir / rel).is_symlink()
+                for rel in old.get("installed_files", [])
+            )
             if all_present:
                 print(f"[build/{openbsd_version}] {port_name} ({pkgname}): up-to-date")
                 return old
 
-    print(f"==> [build/{openbsd_version}] building {port_name} ({pkgname}) [{backend}/{pal}]...")
+    print(f"==> [build/{openbsd_version}] building {port_name} ({pkgname}) [{section} | {backend}/{pal}]...")
     work_port_dir = lane_dir / "work" / port_name
     if work_port_dir.exists():
         shutil.rmtree(work_port_dir)
     src_extract_dir = work_port_dir / "src"
     src_extract_dir.mkdir(parents=True, exist_ok=True)
 
-    mk_paths = [vendor_ports_dir / "/".join(vport.split("/")[:i]) / "Makefile.inc" for i in range(1, len(vport.split("/")))]
-    mk_paths.append(vendor_port_dir / "Makefile")
+    mk_paths = get_port_makefile_paths(
+        vendor_ports_dir,
+        vport,
+        port_dir=port_dir,
+        section=section,
+        include_network_conf=True,
+    )
     vendor_env = parse_openbsd_makefile_vars(mk_paths)
     dist_patch_map, _default_dist_strip = parse_vendor_patchfiles(vendor_env, recipe)
+
+    # Map DIST_TUPLE entries that specify a non-`.` target subdirectory (e.g. `modcargo-crates/cudaforge-0.1.6`)
+    dt_target_map: Dict[str, str] = {}
+    for dt in parse_dist_tuples(vendor_env):
+        if dt["targetdir"] != ".":
+            proj_tail = dt["project"].rsplit("/", 1)[-1]
+            for cand_leaf in (
+                f"{dt['account']}-{proj_tail}-{dt['ref']}.tar.gz",
+                f"{dt['account']}-{dt['project'].replace('/', '-')}-{dt['ref']}.tar.gz",
+                f"{proj_tail}-{dt['ver_part']}.tar.gz",
+                f"{proj_tail}-{dt['ref']}.tar.gz",
+            ):
+                dt_target_map[cand_leaf] = dt["targetdir"]
 
     skip_dist_set = {str(x) for x in recipe.get("skip_distfiles", [])}
     extract_only = set(recipe.get("extract_only", []))
     dist_patches_to_apply: List[Tuple[pathlib.Path, str, int]] = []
+    cargo_archives: List[Tuple[str, pathlib.Path, str]] = []
+    deferred_dt_archives: List[Tuple[pathlib.Path, str]] = []
+
     for df_path, ent in fetched:
         fn = ent["filename"]
         if is_skipped_distfile(fn, skip_dist_set) or df_path.name in skip_dist_set:
@@ -1114,6 +1624,13 @@ def build_single_port(
         if fn in dist_patch_map or df_path.name in dist_patch_map:
             st_lvl = dist_patch_map.get(fn, dist_patch_map.get(df_path.name, 0))
             dist_patches_to_apply.append((df_path, fn, st_lvl))
+            continue
+        if fn.startswith("cargo/") and fn.endswith(".tar.gz"):
+            stem = fn[len("cargo/") : -len(".tar.gz")]
+            cargo_archives.append((stem, df_path, ent["sha256"]))
+            continue
+        if df_path.name in dt_target_map:
+            deferred_dt_archives.append((df_path, dt_target_map[df_path.name]))
             continue
         if extract_only and df_path.name not in extract_only and fn not in extract_only:
             continue
@@ -1125,6 +1642,27 @@ def build_single_port(
         wrkbuild.mkdir(parents=True, exist_ok=True)
     else:
         wrkbuild = wrksrc
+
+    # Place any `DIST_TUPLE` targetdir != "." archives (matching OpenBSD `MODDIST-TUPLE_post-extract`)
+    for dt_ar, target_rel in deferred_dt_archives:
+        tmp_dt = work_port_dir / f".dt-{dt_ar.name}"
+        tmp_dt.mkdir(parents=True, exist_ok=True)
+        extract_archive(dt_ar, tmp_dt)
+        extracted_sub = detect_wrksrc(tmp_dt, "")
+        target_dest = (wrksrc / target_rel).resolve()
+        if target_dest.exists():
+            shutil.rmtree(target_dest)
+        target_dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(extracted_sub), str(target_dest))
+        shutil.rmtree(tmp_dt, ignore_errors=True)
+        if (target_dest / "Cargo.toml").is_file():
+            (target_dest / ".cargo-checksum.json").write_text('{"files":{},"package":null}\n', encoding="utf-8")
+
+    # Extract `cargo/*.tar.gz` into `$WRKSRC/modcargo-crates/<crate>-<ver>` BEFORE patches run
+    # (matching OpenBSD `MODCARGO_post-extract` -> `patch` ordering so `patches/patch-*` can patch crates too!)
+    if cargo_archives:
+        print(f"  [modcargo] extracting {len(cargo_archives)} crate(s) -> {wrksrc / 'modcargo-crates'}...")
+        _extract_cargo_crates_parallel(cargo_archives, wrksrc / "modcargo-crates", jobs=jobs)
 
     for crlf_rel in recipe.get("fix_crlf_files", []):
         crlf_path = wrksrc / crlf_rel
@@ -1140,10 +1678,15 @@ def build_single_port(
             apply_patch_bytes(read_patch_payload(dp_path), wrksrc, dp_strip, f"distpatch/{dp_fn}")
 
     pstrip = int(recipe.get("patch_strip", 0))
-    if recipe.get("apply_vendor_patches", True):
-        apply_patch_dir(vendor_port_dir / "patches", wrksrc, pstrip, skip_patches, f"vendor/{vport}/patches")
     local_pdir = recipe.get("local_patch_dir", "patches")
-    apply_patch_dir(port_dir / local_pdir, wrksrc, pstrip, set(), f"ports/{port_name}/{local_pdir}")
+    if section == "extra":
+        # For self-contained `extra/` ports, apply `extra/<port>/patches/patch-*` ONCE (respecting `skip_vendor_patches` / `skip_patches`).
+        skip_local = skip_patches | set(recipe.get("skip_patches", []))
+        apply_patch_dir(port_dir / local_pdir, wrksrc, pstrip, skip_local, f"extra/{port_name}/{local_pdir}")
+    else:
+        if recipe.get("apply_vendor_patches", True):
+            apply_patch_dir(vendor_port_dir / "patches", wrksrc, pstrip, skip_patches, f"vendor/{vport}/patches")
+        apply_patch_dir(port_dir / local_pdir, wrksrc, pstrip, set(recipe.get("skip_patches", [])), f"ports/{port_name}/{local_pdir}")
 
     env = make_sdk_env(
         openbsd_version=openbsd_version,
@@ -1175,6 +1718,104 @@ def build_single_port(
         else:
             for cmd in recipe.get("build_cmd", []):
                 run_step(cmd, wrkbuild, env, f"{port_name}:build")
+    elif style == "cargo":
+        obsd_cargo = str(REPO_ROOT / "sdk/bin/obsd-cargo")
+        manifest_rel = recipe.get("cargo_manifest_path", "")
+        if not manifest_rel:
+            mk_ct = expand_openbsd_expr(vendor_env.get("MODCARGO_CARGOTOML", ""), vendor_env).strip()
+            if mk_ct and not mk_ct.startswith("$") and mk_ct != "/Cargo.toml":
+                manifest_rel = mk_ct.lstrip("/")
+        manifest_path = (wrksrc / manifest_rel).resolve() if manifest_rel else (wrksrc / "Cargo.toml")
+        env["OBSD_CARGO_MANIFEST_PATH"] = str(manifest_path)
+
+        run_step([obsd_cargo, "prepare"], wrkbuild, env, f"{port_name}:cargo-configure")
+
+        for hook in recipe.get("post_configure", []):
+            run_step(hook, wrkbuild, env, f"{port_name}:post-configure")
+        for hook in recipe.get("pre_build", []):
+            run_step(hook, wrkbuild, env, f"{port_name}:pre-build")
+
+        if recipe.get("build_cmd"):
+            for bcmd in recipe["build_cmd"]:
+                run_step(bcmd, wrkbuild, env, f"{port_name}:build")
+        else:
+            cargo_cmd: List[str] = [
+                obsd_cargo,
+                "build",
+                "--release",
+                "-j",
+                str(jobs),
+                "--manifest-path",
+                str(manifest_path),
+            ]
+            for pkg_sel in recipe.get("cargo_packages", []):
+                cargo_cmd.extend(["-p", str(pkg_sel)])
+            for bin_sel in recipe.get("cargo_bins", []):
+                cargo_cmd.extend(["--bin", str(bin_sel)])
+
+            no_def = recipe.get("cargo_no_default_features")
+            if no_def is None:
+                mk_nd = expand_openbsd_expr(vendor_env.get("MODCARGO_NO_DEFAULT_FEATURES", ""), vendor_env).strip().lower()
+                no_def = mk_nd == "yes"
+            if no_def:
+                cargo_cmd.append("--no-default-features")
+
+            feats = recipe.get("cargo_features")
+            if feats is None:
+                mk_f = expand_openbsd_expr(vendor_env.get("MODCARGO_FEATURES", ""), vendor_env).strip()
+                feats = mk_f.replace(",", " ").split() if mk_f else []
+            elif isinstance(feats, str):
+                feats = [f.strip() for f in feats.replace(",", " ").split() if f.strip()]
+            if feats:
+                cargo_cmd.extend(["--features", ",".join(str(f) for f in feats)])
+
+            cargo_cmd.extend(str(x) for x in recipe.get("cargo_args", []))
+            run_step(cargo_cmd, wrkbuild, env, f"{port_name}:cargo-build")
+
+        if recipe.get("install_cmd"):
+            for icmd in recipe["install_cmd"]:
+                run_step(icmd, wrkbuild, env, f"{port_name}:install")
+        else:
+            # Resolve target release output directory via `obsd-cargo target-info`
+            t_info = json.loads(
+                subprocess.check_output(
+                    [
+                        obsd_cargo,
+                        "target-info",
+                        "--openbsd-version",
+                        openbsd_version,
+                        "--backend",
+                        backend,
+                        "--pal",
+                        pal,
+                    ],
+                    text=True,
+                )
+            )
+            rel_out_dir = wrkbuild / "target" / t_info["target_name"] / "release"
+            bins_to_stage: List[str] = [str(b) for b in recipe.get("cargo_bins", [])]
+            if not bins_to_stage:
+                bins_to_stage = parse_plist_bins(vendor_port_dir)
+            if not bins_to_stage:
+                for app in recipe.get("applets", []):
+                    bp = str(app.get("binary") or (app.get("paths") or [""])[0]).strip()
+                    if bp.startswith("/usr/local/bin/"):
+                        bins_to_stage.append(bp.rsplit("/", 1)[-1])
+            bins_to_stage = list(dict.fromkeys(bins_to_stage))
+            if not bins_to_stage:
+                die(f"{port_name}: build_style='cargo' found no binaries to install (set cargo_bins, pkg/PLIST @bin, or [[applets]])")
+
+            install_bin = str(REPO_ROOT / "sdk/bin/obsd-install")
+            for bname in bins_to_stage:
+                built_bin = rel_out_dir / bname
+                if not built_bin.is_file():
+                    die(f"{port_name}: expected compiled Cargo binary at {built_bin}")
+                run_step(
+                    [install_bin, "-c", "-m", "0755", str(built_bin), str(stage_dir / "usr/local/bin" / bname)],
+                    wrkbuild,
+                    env,
+                    f"{port_name}:cargo-install:{bname}",
+                )
     else:
         if style in ("gnu", "simple"):
             cfg_rel = recipe.get("configure_script", "./configure")
@@ -1260,10 +1901,11 @@ def build_single_port(
         rel for rel, meta in after_snap.items() if before_snap.get(rel) != meta
     )
 
-    record = {
+    record: Dict[str, Any] = {
         "port": port_name,
         "vendor_port": vport,
         "pkgname": pkgname,
+        "section": section,
         "openbsd_version": openbsd_version,
         "backend": backend,
         "pal": pal,
@@ -1271,6 +1913,11 @@ def build_single_port(
         "installed_files": installed_files,
         "applets": recipe.get("applets", []),
     }
+    if section == "extra":
+        comment, descr = get_port_comment_and_descr(vendor_ports_dir, vport, port_dir, section)
+        record["comment"] = comment
+        record["descr"] = descr
+
     stamp_file.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     print(f"[build/{openbsd_version}] finished {port_name} ({pkgname}): {len(installed_files)} staged entries")
     return record
@@ -1292,6 +1939,12 @@ def resolve_obsd_root_arg(arg_val: Optional[str]) -> pathlib.Path:
         sys.stderr.write(proc.stderr)
         raise SystemExit(proc.returncode)
     return pathlib.Path(proc.stdout.strip()).resolve()
+
+
+def resolve_build_lane_dir(openbsd_version: str, backend: str, pal: str, build_root_arg: str = "") -> pathlib.Path:
+    raw = build_root_arg.strip() or os.environ.get("BUILD_ROOT", "").strip()
+    base = pathlib.Path(raw).resolve() if raw else (REPO_ROOT / "build")
+    return base / "openbsd" / openbsd_version / backend / pal
 
 
 def cmd_list_catalog(args: argparse.Namespace) -> int:
@@ -1318,44 +1971,80 @@ def cmd_list_catalog(args: argparse.Namespace) -> int:
 
 
 def cmd_list(args: argparse.Namespace) -> int:
-    recipes = discover_recipes(args.openbsd_version, [args.port] if args.port else None)
-    lane_dir = REPO_ROOT / "build/openbsd" / args.openbsd_version / args.backend / args.pal
+    recipes = discover_recipes(
+        args.openbsd_version,
+        [args.port] if args.port else None,
+        backend=args.backend,
+        pal=args.pal,
+        section=args.section,
+        include_cross_section_deps=bool(args.port),
+    )
+    lane_dir = resolve_build_lane_dir(args.openbsd_version, args.backend, args.pal, args.build_root)
     vendor_ports_dir = REPO_ROOT / "vendor/openbsd/versions" / args.openbsd_version / "ports"
 
     if not recipes:
-        print(f"# No port recipes under ports/ yet (lane: OpenBSD {args.openbsd_version} {args.backend}/{args.pal})")
+        sec_lbl = "ports/ or extra/" if args.section == "all" else f"{args.section}/"
+        print(f"# No port recipes under {sec_lbl} yet (lane: OpenBSD {args.openbsd_version} {args.backend}/{args.pal})")
         return 0
 
     print(f"{'PORT':<24} {'PKGNAME':<24} {'VENDOR':<10} {'STATUS':<10} {'APPLETS'}")
     for rec in recipes:
         pname = rec["port"]
-        vdir = vendor_ports_dir / rec["vendor_port"]
-        has_vendor = "imported" if (vdir / "distinfo").is_file() else "missing"
-        pkgname = rec.get("pkgname") or (get_port_pkgname(vendor_ports_dir, rec["vendor_port"]) if has_vendor == "imported" else "-")
+        sec = rec.get("section", "ports")
+        pdir: pathlib.Path = rec["port_dir"]
+        if sec == "extra":
+            has_meta = "extra" if (pdir / "distinfo").is_file() else "missing"
+            pkgname = rec.get("pkgname") or (
+                get_port_pkgname(vendor_ports_dir, rec["vendor_port"], port_dir=pdir, section="extra")
+                if (pdir / "Makefile").is_file()
+                else "-"
+            )
+        else:
+            vdir = vendor_ports_dir / rec["vendor_port"]
+            has_meta = "imported" if (vdir / "distinfo").is_file() else "missing"
+            pkgname = rec.get("pkgname") or (
+                get_port_pkgname(vendor_ports_dir, rec["vendor_port"], port_dir=pdir, section="ports")
+                if has_meta == "imported"
+                else "-"
+            )
         stamp = lane_dir / ".stamps" / (pname.replace("/", "__") + ".json")
         status = "built" if stamp.is_file() else "pending"
         app_names = ",".join(a.get("sym", "") for a in rec.get("applets", [])) or "(lib)"
-        print(f"{pname:<24} {pkgname:<24} {has_vendor:<10} {status:<10} {app_names}")
+        print(f"{pname:<24} {pkgname:<24} {has_meta:<10} {status:<10} {app_names}")
     return 0
 
 
 def cmd_fetch(args: argparse.Namespace) -> int:
-    recipes = discover_recipes(args.openbsd_version, [args.port] if args.port else None)
+    recipes = discover_recipes(
+        args.openbsd_version,
+        [args.port] if args.port else None,
+        backend=args.backend,
+        pal=args.pal,
+        section=args.section,
+        include_cross_section_deps=True,
+    )
     if not recipes:
-        print(f"[fetch/{args.openbsd_version}] 0 port recipes in ports/ (nothing to fetch)")
+        print(f"[fetch/{args.openbsd_version}] 0 port recipes in section '{args.section}' (nothing to fetch)")
         return 0
     for rec in recipes:
-        fetch_port_distfiles(rec, args.openbsd_version)
+        fetch_port_distfiles(rec, args.openbsd_version, jobs=args.jobs)
     return 0
 
 
 def cmd_build(args: argparse.Namespace) -> int:
     obsd_root = resolve_obsd_root_arg(args.libobsdcompat_root)
-    recipes = discover_recipes(args.openbsd_version, [args.port] if args.port else None)
-    lane_dir = REPO_ROOT / "build/openbsd" / args.openbsd_version / args.backend / args.pal
+    recipes = discover_recipes(
+        args.openbsd_version,
+        [args.port] if args.port else None,
+        backend=args.backend,
+        pal=args.pal,
+        section=args.section,
+        include_cross_section_deps=True,
+    )
+    lane_dir = resolve_build_lane_dir(args.openbsd_version, args.backend, args.pal, args.build_root)
     lane_dir.mkdir(parents=True, exist_ok=True)
     if not recipes:
-        print(f"[build/{args.openbsd_version}] 0 port recipes in ports/ (nothing to build)")
+        print(f"[build/{args.openbsd_version}] 0 port recipes in section '{args.section}' (nothing to build)")
         return 0
     for rec in recipes:
         build_single_port(
@@ -1373,7 +2062,7 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 def cmd_package(args: argparse.Namespace) -> int:
     obsd_root = resolve_obsd_root_arg(args.libobsdcompat_root)
-    lane_dir = REPO_ROOT / "build/openbsd" / args.openbsd_version / args.backend / args.pal
+    lane_dir = resolve_build_lane_dir(args.openbsd_version, args.backend, args.pal, args.build_root)
     lane_dir.mkdir(parents=True, exist_ok=True)
 
     adapter_script = REPO_ROOT / "targets" / args.backend / args.pal / f"package_{'wasm' if args.pal in ('emscripten', 'wasi') else args.pal}.py"
@@ -1382,8 +2071,16 @@ def cmd_package(args: argparse.Namespace) -> int:
     if not adapter_script.is_file():
         die(f"target packaging adapter not implemented for {args.backend}/{args.pal}: expected {adapter_script}")
 
-    # Collect all declared recipes (so ports-applets.tsv reflects the complete built lane!)
-    all_recipes = discover_recipes(args.openbsd_version, None)
+    # INVARIANT: ALWAYS assemble `built-ports.json` across `section="all"` so
+    # `make package SECTION=extra` never drops previously built `ports/*` applets!
+    all_recipes = discover_recipes(
+        args.openbsd_version,
+        None,
+        backend=args.backend,
+        pal=args.pal,
+        section="all",
+    )
+    vendor_ports_dir = REPO_ROOT / "vendor/openbsd/versions" / args.openbsd_version / "ports"
     manifest_file = lane_dir / "built-ports.json"
     stamps_dir = lane_dir / ".stamps"
     records = []
@@ -1391,8 +2088,19 @@ def cmd_package(args: argparse.Namespace) -> int:
         st_path = stamps_dir / (rec["port"].replace("/", "__") + ".json")
         if st_path.is_file():
             data = json.loads(st_path.read_text(encoding="utf-8"))
-            # Always use latest applet definitions from port.toml in case aliases were updated
+            sec = rec.get("section", "ports")
+            data["section"] = sec
             data["applets"] = rec.get("applets", [])
+            if sec == "extra":
+                if not data.get("comment") or not data.get("descr"):
+                    comment, descr = get_port_comment_and_descr(
+                        vendor_ports_dir,
+                        rec["vendor_port"],
+                        rec["port_dir"],
+                        sec,
+                    )
+                    data.setdefault("comment", comment)
+                    data.setdefault("descr", descr)
             records.append(data)
     manifest_file.write_text(json.dumps(records, indent=2) + "\n", encoding="utf-8")
 
@@ -1429,6 +2137,8 @@ def main() -> int:
         sp.add_argument("--openbsd-version", default="8.0")
         sp.add_argument("--backend", default="emulate")
         sp.add_argument("--pal", default="emscripten")
+        sp.add_argument("--section", default="all", choices=("all", "ports", "extra"))
+        sp.add_argument("--build-root", default="")
         sp.add_argument("--libobsdcompat-root", default="")
         sp.add_argument("--port", default="")
         sp.add_argument("--jobs", type=int, default=os.cpu_count() or 8)

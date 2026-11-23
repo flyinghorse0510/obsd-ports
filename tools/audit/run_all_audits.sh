@@ -6,4 +6,5 @@ bash "$here/audit_tree_layout.sh"
 bash "$here/audit_make_hierarchy.sh"
 bash "$here/audit_matrix_seams.sh"
 bash "$here/audit_vendor_clean.sh"
+python3 -I "$here/audit_extra_ports.py"
 printf 'all obsd-ports audits: PASS\n'

@@ -1,4 +1,4 @@
-.PHONY: audit audit-vendor audit-layout audit-make audit-matrix
+.PHONY: audit audit-vendor audit-layout audit-make audit-matrix audit-extra
 
 audit:
 	bash "$(TOOLS_ROOT)/audit/run_all_audits.sh"
@@ -14,3 +14,6 @@ audit-make:
 
 audit-matrix:
 	bash "$(TOOLS_ROOT)/audit/audit_matrix_seams.sh"
+
+audit-extra:
+	"$(PYTHON)" -I "$(TOOLS_ROOT)/audit/audit_extra_ports.py"

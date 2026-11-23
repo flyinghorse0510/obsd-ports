@@ -96,6 +96,7 @@ def main() -> int:
     ap.add_argument("--openbsd-version", default="8.0")
     ap.add_argument("--backend", default="emulate")
     ap.add_argument("--pal", default="emscripten")
+    ap.add_argument("--section", default="all", choices=("all", "ports", "extra"))
     ap.add_argument("--libobsdcompat-root", required=True)
     ap.add_argument("--port", default="")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 8)
@@ -134,6 +135,7 @@ def main() -> int:
     env["OPENBSD_VERSION"] = args.openbsd_version
     env["COMPAT_BACKEND"] = args.backend
     env["COMPAT_PAL"] = args.pal
+    env["SECTION"] = args.section
     env["OBSD_LANE_DIR"] = str(lane_dir)
 
     path_parts = [str(REPO_ROOT / "sdk/bin")]

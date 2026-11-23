@@ -14,10 +14,20 @@ vendor_port = "textproc/jq"
 # Topological build dependencies (built & staged into stage/usr/local first)
 depends = ["textproc/oniguruma"]
 
-# "gnu" (./configure) | "simple" | "cmake" | "make" | "script"
+# "gnu" (./configure) | "simple" | "cmake" | "make" | "cargo" | "script"
 build_style = "gnu"
 separate_build = false
 use_gmake = true
+
+# Optional 3D matrix eligibility gates (`only_versions` kept as alias for `only_for_versions`)
+# only_for_versions = ["7.8", "7.9", "8.0"]
+# only_for_backends = ["emulate", "translate"]
+# only_for_pals = ["emscripten", "wasi", "darwin", "ios", "linux"]
+# only_for_targets = ["emulate/emscripten"]
+# not_for_versions = []
+# not_for_backends = []
+# not_for_pals = []
+# not_for_targets = []
 
 # Vendor patch & distpatch application in work/<port>/ (never mutates vendor/)
 # OpenBSD PATCHFILES (e.g. bash53-001..) declared in vendor Makefile & distinfo
@@ -67,10 +77,30 @@ binary = "/usr/local/bin/jq"
 paths = ["/usr/local/bin/jq"]
 entry = "auto"                 # auto-detects __main_argc_argv, main, or obsd_tool_main
 
-# Optional per-release overrides if 7.8 and 7.9 ever need distinct flags:
+# Optional 6-layer 3D matrix overrides (resolved coarse -> specific:
+# base -> [versions."<ver>"] -> [backends."<backend>"] -> [pals."<pal>"] ->
+# [targets."<backend>/<pal>"] -> [matrix."<ver>/<backend>/<pal>"], shallow-merging `env`):
 # [versions."7.8"]
 # skip_vendor_patches = ["patch-foo"]
+# [pals.ios]
+# cargo_features = ["portable-default"]
 ```
+
+## Cargo (`MODULES = devel/cargo`) Recipe Fields
+
+For `build_style = "cargo"` (typically under `extra/<category>/<name>/`):
+
+```toml
+build_style = "cargo"
+cargo_packages = ["goose-cli"]
+cargo_bins = ["goose"]
+cargo_no_default_features = true
+cargo_features = ["portable-default", "code-mode"]
+cargo_args = []
+cargo_patch_crates = {}
+```
+
+Generate `crates.inc` and `distinfo` automatically with `python3 -I tools/extra/gen_cargo_distinfo.py --port-dir extra/<category>/<name>`.
 
 ## Multi-Call Alias Example (`archivers/xz`)
 

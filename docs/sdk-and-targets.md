@@ -8,6 +8,7 @@
   - Produces WASM64 relocatable executables via `wasm-ld -m wasm64 -r` (statically linking port `.a` libraries while leaving base OpenBSD `libobsdc-wasm-<ver>.a` symbols undefined) and verifies every undefined symbol against `libobsdc-wasm-<ver>.a` so `./configure` link checks (`AC_CHECK_FUNC`, `AC_CHECK_LIB`, `AC_SEARCH_LIBS`) report exact OpenBSD capabilities.
 - **`obsd-pkg-config`**: Hermetic wrapper isolated to `$(OBSD_STAGE_DIR)/usr/local/{lib,share}/pkgconfig` plus synthesized base OpenBSD `.pc` descriptors (`openssl`, `libssl`, `libcrypto`, `libtls`, `zlib`, `curses`, `ncursesw`, `expat`, `libedit`).
 - **`obsd-strip` / `obsd-install`**: Preserves WASM `linking` custom sections during `make install` / `install -s`.
+- **`obsd-cargo` / `obsd-rust-ld`**: Hermetic OpenBSD `MODULES = devel/cargo` toolchain (`sdk/rust/wasm64-unknown-openbsd.json`, auto-bootstrapped `.cache/sdk/host-rust` `nightly` + patched `rust-src` + patched OpenBSD `aarch64`-layout `libc` overlay, offline `modcargo-crates` vendoring, `HOST_CC` vs `CC_wasm64_unknown_openbsd` isolation, `profile.release.strip="debuginfo"`, and weak `unwind_stub.o`).
 
 ## Standalone WASM64 Execution Helper (`targets/emulate/emscripten/merge_wasm_guest.py`)
 

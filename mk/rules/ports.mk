@@ -1,4 +1,4 @@
-.PHONY: all list fetch build package
+.PHONY: all list list-extra fetch build package
 
 all: package
 
@@ -7,6 +7,17 @@ list:
 		--openbsd-version "$(OPENBSD_VERSION)" \
 		--backend "$(COMPAT_BACKEND)" \
 		--pal "$(COMPAT_PAL)" \
+		--section "$(SECTION)" \
+		--build-root "$(BUILD_ROOT)" \
+		$(if $(strip $(PORT)),--port "$(PORT)",)
+
+list-extra:
+	@"$(PYTHON)" -I "$(TOOLS_ROOT)/build_ports.py" list \
+		--openbsd-version "$(OPENBSD_VERSION)" \
+		--backend "$(COMPAT_BACKEND)" \
+		--pal "$(COMPAT_PAL)" \
+		--section extra \
+		--build-root "$(BUILD_ROOT)" \
 		$(if $(strip $(PORT)),--port "$(PORT)",)
 
 fetch:
@@ -14,6 +25,8 @@ fetch:
 		--openbsd-version "$(OPENBSD_VERSION)" \
 		--backend "$(COMPAT_BACKEND)" \
 		--pal "$(COMPAT_PAL)" \
+		--section "$(SECTION)" \
+		--build-root "$(BUILD_ROOT)" \
 		--jobs "$(JOBS)" \
 		$(if $(strip $(PORT)),--port "$(PORT)",)
 
@@ -23,6 +36,8 @@ build:
 		--openbsd-version "$(OPENBSD_VERSION)" \
 		--backend "$(COMPAT_BACKEND)" \
 		--pal "$(COMPAT_PAL)" \
+		--section "$(SECTION)" \
+		--build-root "$(BUILD_ROOT)" \
 		--libobsdcompat-root "$(LIBOBSDCOMPAT_ROOT)" \
 		--jobs "$(JOBS)" \
 		$(if $(strip $(PORT)),--port "$(PORT)",)
@@ -33,6 +48,8 @@ package: build
 		--openbsd-version "$(OPENBSD_VERSION)" \
 		--backend "$(COMPAT_BACKEND)" \
 		--pal "$(COMPAT_PAL)" \
+		--section "$(SECTION)" \
+		--build-root "$(BUILD_ROOT)" \
 		--libobsdcompat-root "$(LIBOBSDCOMPAT_ROOT)" \
 		--jobs "$(JOBS)" \
 		$(if $(strip $(PORT)),--port "$(PORT)",)

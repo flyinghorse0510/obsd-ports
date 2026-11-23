@@ -7,15 +7,17 @@ obsd-ports/
 ├── Makefile                        # Guarded parser boundary -> mk/root/main.mk
 ├── config/
 │   ├── versions/                   # OpenBSD release axis (index.tsv, 7.8.mk, 7.9.mk, 8.0.mk, *-catalog.tsv)
-│   └── matrix/                     # Backend x PAL matrix (index.tsv, backends/*.mk, pals/*.mk)
+│   ├── matrix/                     # 7-cell Backend x PAL matrix (index.tsv, backends/*.mk, pals/*.mk)
+│   └── extra/                      # Extra ports manifest (index.tsv)
 ├── mk/
 │   ├── root/                       # Standalone clean + strict layer ordering
 │   ├── config/                     # Parameterization & declared LIBOBSDCOMPAT_ROOT resolution
-│   ├── catalog/                    # Port recipe discovery under ports/**
-│   └── rules/                      # sync-vendor, import, fetch, build, package, check, audit
+│   ├── catalog/                    # Port recipe discovery under ports/** and extra/** (SECTION=all|ports|extra)
+│   └── rules/                      # sync-vendor, import, list, list-extra, fetch, build, package, check, audit
 ├── sdk/
-│   ├── bin/                        # obsd-cc, obsd-c++, obsd-ar, obsd-ranlib, obsd-ld, obsd-nm, obsd-strip, obsd-pkg-config
+│   ├── bin/                        # obsd-cc, obsd-c++, obsd-ar, obsd-ranlib, obsd-ld, obsd-nm, obsd-strip, obsd-pkg-config, obsd-cargo, obsd-rust-ld
 │   ├── lib/obsd_toolchain.py       # Sysroot-remapping WASM64 compiler & symbol-verifying linker driver
+│   ├── rust/                       # wasm64-unknown-openbsd.json, obsd_rust.py, unwind_stub.c, 3D matrix Rust target mapper
 │   ├── autoconf/config.site        # Cross-compilation cache for GNU configure & gnulib
 │   └── cmake/openbsd-wasm64.cmake  # CMake cross-compilation toolchain
 ├── vendor/openbsd/versions/
@@ -23,15 +25,17 @@ obsd-ports/
 │   ├── 7.9/ports/                  # Immutable OpenBSD 7.9 port Makefiles, distinfo, patches/*, pkg/*
 │   └── 8.0/ports/                  # Immutable OpenBSD 8.0 port Makefiles, distinfo, patches/*, pkg/*
 ├── ports/                          # Declarative port build recipes (<category>/<name>/port.toml)
+├── extra/                          # Self-contained OpenBSD-style extra ports (<category>/<name>/{Makefile,distinfo,pkg/*,port.toml})
 ├── targets/
-│   ├── emulate/{emscripten,wasi,darwin}/
-│   └── translate/{darwin,linux}/
+│   ├── emulate/{emscripten,wasi,darwin,ios}/
+│   └── translate/{darwin,ios,linux}/
 ├── tools/
-│   ├── build_ports.py              # Distinfo parser, fetcher, patch applier, topological builder
+│   ├── build_ports.py              # Distinfo parser, parallel fetcher, 3D matrix resolver, topological builder
+│   ├── extra/                      # gen_cargo_distinfo.py (crates.inc & distinfo generator for MODULES=devel/cargo)
 │   ├── vendor/                     # sync_openbsd_ports.py & import_port.py
 │   ├── config/                     # locate-libobsdcompat.sh
 │   ├── testing/                    # run_check.py
-│   └── audit/                      # vendor-baseline.tsv & immutability/hierarchy/matrix audits
+│   └── audit/                      # vendor-baseline.tsv, audit_extra_ports.py & immutability/hierarchy/matrix audits
 └── tests/                          # Automated dual-release WASM64 port test suite
 ```
 
