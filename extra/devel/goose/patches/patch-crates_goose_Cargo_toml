@@ -1,0 +1,21 @@
+Gate desktop clipboard crate `arboard` out on headless/embedded `ios` and `wasi` targets.
+--- crates/goose/Cargo.toml.orig
++++ crates/goose/Cargo.toml
+@@ -116,7 +116,6 @@
+     "transport-streamable-http-client-unix-socket",
+ ] }
+ oauth2 = { version = "5.0", default-features = false }
+-arboard = { workspace = true }
+ anyhow = { workspace = true }
+ thiserror = { workspace = true }
+ futures = { workspace = true }
+@@ -263,6 +262,9 @@
+ [target."cfg(unix)".dependencies]
+ libc = { version = "0.2.182", default-features = false, features = ["std"] }
+ 
++[target.'cfg(not(any(target_os = "ios", target_os = "wasi")))'.dependencies]
++arboard = { workspace = true }
++
+ [dev-dependencies]
+ serial_test = { workspace = true }
+ mockall = { version = "0.15", default-features = false }

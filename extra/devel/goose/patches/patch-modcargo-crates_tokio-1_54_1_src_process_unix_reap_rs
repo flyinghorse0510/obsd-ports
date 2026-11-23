@@ -1,0 +1,40 @@
+Poll `try_wait()` on a 10ms Tokio timer fallback on `wasm64` so child reaping
+never hangs if async `SIGCHLD` self-pipe delivery does not wake `kevent()`.
+--- modcargo-crates/tokio-1.54.1/src/process/unix/reap.rs.orig
++++ modcargo-crates/tokio-1.54.1/src/process/unix/reap.rs
+@@ -21,6 +21,8 @@
+     inner: Option<W>,
+     orphan_queue: Q,
+     signal: S,
++    #[cfg(all(target_arch = "wasm64", feature = "time"))]
++    wasm_poll_delay: Option<Pin<Box<crate::time::Sleep>>>,
+ }
+ 
+ impl<W, Q, S> Deref for Reaper<W, Q, S>
+@@ -45,6 +47,8 @@
+             inner: Some(inner),
+             orphan_queue,
+             signal,
++            #[cfg(all(target_arch = "wasm64", feature = "time"))]
++            wasm_poll_delay: None,
+         }
+     }
+ 
+@@ -90,6 +94,17 @@
+                 return Poll::Ready(Ok(status));
+             }
+ 
++            #[cfg(all(target_arch = "wasm64", feature = "time"))]
++            {
++                let delay = self.wasm_poll_delay.get_or_insert_with(|| {
++                    Box::pin(crate::time::sleep(std::time::Duration::from_millis(10)))
++                });
++                if delay.as_mut().poll(cx).is_ready() {
++                    self.wasm_poll_delay = None;
++                    continue;
++                }
++            }
++
+             // If our attempt to poll for the next signal was not ready, then
+             // we've arranged for our task to get notified and we can bail out.
+             if registered_interest {

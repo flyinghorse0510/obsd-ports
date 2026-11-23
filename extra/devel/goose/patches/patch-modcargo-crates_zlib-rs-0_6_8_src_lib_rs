@@ -1,0 +1,12 @@
+Enable `#![feature(simd_wasm64)]` on `target_arch = "wasm64"` so `zlib-rs`'s
+`adler32/wasm.rs` (`core::arch::wasm64::*`) compiles cleanly.
+--- modcargo-crates/zlib-rs-0.6.8/src/lib.rs.orig
++++ modcargo-crates/zlib-rs-0.6.8/src/lib.rs
+@@ -4,6 +4,7 @@
+     all(any(miri, feature = "lsx"), target_arch = "loongarch64"),
+     feature(stdarch_loongarch)
+ )]
++#![cfg_attr(target_arch = "wasm64", feature(simd_wasm64))]
+ 
+ #[cfg(any(feature = "rust-allocator", feature = "c-allocator"))]
+ extern crate alloc;

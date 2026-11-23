@@ -1,0 +1,17 @@
+Gate `arboard::Clipboard` usage on `not(any(target_os = "ios", target_os = "wasi"))`.
+--- crates/goose/src/providers/oauth_device_flow.rs.orig
++++ crates/goose/src/providers/oauth_device_flow.rs
+@@ -351,10 +351,13 @@
+         return;
+     }
+ 
++    #[cfg(not(any(target_os = "ios", target_os = "wasi")))]
+     let copied = arboard::Clipboard::new()
+         .ok()
+         .and_then(|mut cb| cb.set_text(&device.user_code).ok())
+         .is_some();
++    #[cfg(any(target_os = "ios", target_os = "wasi"))]
++    let copied = false;
+     if let Err(e) = webbrowser::open(&verify_url) {
+         tracing::warn!("Failed to open browser: {}", e);
+     }

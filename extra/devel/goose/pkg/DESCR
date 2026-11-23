@@ -1,0 +1,9 @@
+Goose is an extensible open-source AI agent built in Rust that automates
+complex software engineering tasks from the command line. It plans, writes,
+edits, builds, and tests code autonomously across OpenAI, Anthropic, Google,
+Ollama, llama.cpp, and any OpenAI-compatible inference endpoint.
+
+This OpenBSD port is built 100% JIT-free for strict W^X environments, pairing
+Model Context Protocol (MCP) server/extension orchestration, SQLite session
+persistence, and tree-sitter code analysis with a pure-Rust boa_engine
+JavaScript interpreter for token-efficient code-mode tool execution.

@@ -1,0 +1,16 @@
+Allow opting out of background models.dev refresh via GOOSE_OFFLINE_MODEL_CATALOG=1
+while keeping embedded canonical model metadata active.
+--- crates/goose/src/model_catalog.rs.orig
++++ crates/goose/src/model_catalog.rs
+@@ -9,6 +9,11 @@
+ }
+ 
+ pub fn initialize() {
++    if std::env::var("GOOSE_OFFLINE_MODEL_CATALOG")
++        .is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
++    {
++        return;
++    }
+     let cache_dir = cache_dir();
+     if let Err(error) = load_cached_catalog(&cache_dir) {
+         tracing::warn!(%error, "ignoring invalid cached model catalog");

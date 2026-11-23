@@ -1,0 +1,50 @@
+Cap default WASM64 Tokio worker/blocking and Rayon threads, drain worker Web
+Workers cleanly across repeated `execve` calls, and bound runtime shutdown.
+--- crates/goose-cli/src/main.rs.orig
++++ crates/goose-cli/src/main.rs
+@@ -38,15 +38,43 @@
+     #[cfg(windows)]
+     enable_windows_vt_processing();
+ 
++    #[cfg(target_arch = "wasm64")]
++    if std::env::var_os("RAYON_NUM_THREADS").is_none() {
++        std::env::set_var("RAYON_NUM_THREADS", "2");
++    }
++
+     let handle = std::thread::Builder::new()
+         .name("goose-cli-main".to_string())
+         .stack_size(8 * 1024 * 1024)
+         .spawn(|| {
+-            let runtime = tokio::runtime::Builder::new_multi_thread()
++            let mut builder = tokio::runtime::Builder::new_multi_thread();
++            #[cfg(target_arch = "wasm64")]
++            {
++                let workers = std::env::var("TOKIO_WORKER_THREADS")
++                    .ok()
++                    .and_then(|v| v.parse::<usize>().ok())
++                    .filter(|&n| n > 0)
++                    .unwrap_or(4);
++                let max_blocking = std::env::var("TOKIO_MAX_BLOCKING_THREADS")
++                    .ok()
++                    .and_then(|v| v.parse::<usize>().ok())
++                    .filter(|&n| n > 0)
++                    .unwrap_or(8);
++                builder.worker_threads(workers);
++                builder.max_blocking_threads(max_blocking);
++                builder.thread_keep_alive(std::time::Duration::from_millis(1));
++            }
++            let runtime = builder
+                 .enable_all()
+                 .build()
+                 .expect("Failed to build Tokio runtime");
+-            runtime.block_on(run())
++            let result = runtime.block_on(run());
++            #[cfg(target_arch = "wasm64")]
++            {
++                runtime.shutdown_timeout(std::time::Duration::from_millis(50));
++                std::thread::sleep(std::time::Duration::from_millis(25));
++            }
++            result
+         })
+         .map_err(|e| anyhow::anyhow!("Failed to spawn goose-cli main thread: {}", e))?;
+ 

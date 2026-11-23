@@ -10,3 +10,4 @@
 #   pals          -- supported COMPAT_PAL values (* or comma-separated subset of emscripten,wasi,darwin,ios,linux)
 #   notes         -- brief port summary
 port	category	pkgname_base	upstream_url	jit_free	versions	backends	pals	notes
+devel/goose	devel	goose	https://github.com/block/goose	yes	7.8,7.9,8.0	emulate,translate	emscripten,wasi,darwin,ios,linux	Extensible open-source AI agent with pure-Rust boa_engine code-mode and MCP support

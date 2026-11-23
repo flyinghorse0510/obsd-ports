@@ -1,0 +1,165 @@
+Execute developer shell commands via `spawn_blocking` + `std::process::Command` on
+`wasm64` so `ChildStdout`/`ChildStderr` never miss `EV_EOF` on `mio` `kqueue`.
+--- crates/goose/src/agents/platform_extensions/developer/shell.rs.orig
++++ crates/goose/src/agents/platform_extensions/developer/shell.rs
+@@ -413,6 +413,141 @@
+     })
+ }
+ 
++#[cfg(target_arch = "wasm64")]
++async fn run_command_wasm64(
++    command_line: &str,
++    timeout_secs: Option<u64>,
++    working_dir: Option<&std::path::Path>,
++    session_id: Option<&str>,
++    notification_emitter: Option<ToolCallNotificationEmitter>,
++    cancellation_token: CancellationToken,
++) -> Result<ExecutionOutput, String> {
++    let deadline = Some(resolve_shell_timeout(timeout_secs))
++        .filter(|secs| *secs > 0)
++        .map(|secs| tokio::time::Instant::now() + Duration::from_secs(secs));
++    if cancellation_token.is_cancelled() {
++        return Ok(ExecutionOutput {
++            lines: Vec::new(),
++            exit_code: None,
++            timed_out: false,
++            output_truncated: false,
++            output_collection_error: None,
++        });
++    }
++
++    let shell = unix_shell();
++    let cmd_str = command_line.to_string();
++    let cwd_opt = working_dir.map(|p| p.to_path_buf());
++    let sid_opt = session_id.filter(|s| !s.is_empty()).map(|s| s.to_string());
++
++    let mut std_cmd = std::process::Command::new(&shell);
++    std_cmd.args(unix_shell_command_args(&cmd_str));
++    if let Some(ref dir) = cwd_opt {
++        std_cmd.current_dir(dir);
++    }
++    std_cmd.envs(AGENT_ENVIRONMENT);
++    if let Some(ref sid) = sid_opt {
++        std_cmd.env("AGENT_SESSION_ID", sid);
++    } else {
++        std_cmd.env_remove("AGENT_SESSION_ID");
++    }
++    std_cmd
++        .stdin(Stdio::null())
++        .stdout(Stdio::piped())
++        .stderr(Stdio::piped());
++
++    let mut child = std_cmd
++        .spawn()
++        .map_err(|error| format!("Failed to spawn shell command: {}", error))?;
++    let child_pid = child.id() as libc::pid_t;
++    let child_stdout = child
++        .stdout
++        .take()
++        .ok_or_else(|| "Failed to capture stdout".to_string())?;
++    let child_stderr = child
++        .stderr
++        .take()
++        .ok_or_else(|| "Failed to capture stderr".to_string())?;
++
++    let mut blocking_fut = tokio::task::spawn_blocking(
++        move || -> Result<(Vec<(bool, String)>, Option<i32>), String> {
++            use std::io::BufRead;
++            let (out_lines, err_lines) = std::thread::scope(|s| {
++                let err_h = s.spawn(move || -> Vec<String> {
++                    std::io::BufReader::new(child_stderr)
++                        .split(b'\n')
++                        .filter_map(|r| r.ok())
++                        .map(|b| String::from_utf8_lossy(&b).into_owned())
++                        .collect()
++                });
++                let out_v: Vec<String> = std::io::BufReader::new(child_stdout)
++                    .split(b'\n')
++                    .filter_map(|r| r.ok())
++                    .map(|b| String::from_utf8_lossy(&b).into_owned())
++                    .collect();
++                let err_v = err_h.join().unwrap_or_default();
++                (out_v, err_v)
++            });
++            let status = child
++                .wait()
++                .map_err(|error| format!("Failed waiting on shell command: {}", error))?;
++            let mut combined = Vec::with_capacity(out_lines.len() + err_lines.len());
++            for ln in out_lines {
++                combined.push((false, ln));
++            }
++            for ln in err_lines {
++                combined.push((true, ln));
++            }
++            Ok((combined, status.code()))
++        },
++    );
++
++    tokio::select! {
++        biased;
++        res = &mut blocking_fut => {
++            let (lines, exit_code) = res
++                .map_err(|e| format!("Shell blocking task failed: {}", e))??;
++            if let Some(emitter) = notification_emitter {
++                let mut batcher = ShellOutputBatcher::new(emitter);
++                for (is_err, ln) in &lines {
++                    let _ = batcher.push_line(*is_err, ln);
++                }
++                batcher.flush();
++            }
++            Ok(ExecutionOutput {
++                lines,
++                exit_code,
++                timed_out: false,
++                output_truncated: false,
++                output_collection_error: None,
++            })
++        }
++        _ = sleep_until_deadline(deadline) => {
++            unsafe { let _ = libc::kill(child_pid, libc::SIGKILL); }
++            let _ = blocking_fut.await;
++            Ok(ExecutionOutput {
++                lines: Vec::new(),
++                exit_code: None,
++                timed_out: true,
++                output_truncated: false,
++                output_collection_error: None,
++            })
++        }
++        _ = cancellation_token.cancelled() => {
++            unsafe { let _ = libc::kill(child_pid, libc::SIGKILL); }
++            let _ = blocking_fut.await;
++            Ok(ExecutionOutput {
++                lines: Vec::new(),
++                exit_code: None,
++                timed_out: false,
++                output_truncated: false,
++                output_collection_error: None,
++            })
++        }
++    }
++}
++
++#[cfg_attr(target_arch = "wasm64", allow(unreachable_code, unused_variables))]
+ async fn run_command(
+     command_line: &str,
+     timeout_secs: Option<u64>,
+@@ -421,6 +556,18 @@
+     notification_emitter: Option<ToolCallNotificationEmitter>,
+     cancellation_token: CancellationToken,
+ ) -> Result<ExecutionOutput, String> {
++    #[cfg(target_arch = "wasm64")]
++    {
++        return run_command_wasm64(
++            command_line,
++            timeout_secs,
++            working_dir,
++            session_id,
++            notification_emitter,
++            cancellation_token,
++        )
++        .await;
++    }
+     let deadline = Some(resolve_shell_timeout(timeout_secs))
+         .filter(|secs| *secs > 0)
+         .map(|secs| tokio::time::Instant::now() + Duration::from_secs(secs));

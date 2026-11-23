@@ -1,0 +1,58 @@
+port = "devel/goose"
+only_for_versions = ["7.8", "7.9", "8.0"]
+only_for_backends = ["emulate", "translate"]
+only_for_pals = ["emscripten", "wasi", "darwin", "ios", "linux"]
+build_style = "cargo"
+cargo_packages = ["goose-cli"]
+cargo_bins = ["goose"]
+cargo_no_default_features = true
+cargo_features = [
+    "portable-default",
+    "code-mode",
+    "online-model-meta",
+    "disable-update",
+]
+pre_configure = [
+    "rm -rf \"$WRKSRC/documentation\" \"$WRKSRC/ui\"",
+]
+
+[env]
+GOOSE_TELEMETRY_OFF = "1"
+
+[versions."7.8"]
+env = { OPENBSD_RELEASE = "7.8" }
+
+[versions."7.9"]
+env = { OPENBSD_RELEASE = "7.9" }
+
+[versions."8.0"]
+env = { OPENBSD_RELEASE = "8.0" }
+
+[[backends.emulate.applets]]
+sym = "goose"
+binary = "/usr/local/bin/goose"
+paths = ["/usr/local/bin/goose"]
+
+[backends.translate]
+applets = []
+
+[pals.emscripten]
+env = { TOKIO_WORKER_THREADS = "4", RAYON_NUM_THREADS = "2" }
+
+[pals.ios]
+env = { OBSD_STRICT_WX_ZERO_JIT = "1" }
+
+[pals.darwin]
+env = {}
+
+[pals.wasi]
+env = { TOKIO_WORKER_THREADS = "2", RAYON_NUM_THREADS = "1" }
+
+[pals.linux]
+env = {}
+
+[targets."emulate/emscripten"]
+env = { OBSD_WASM64_PTHREAD_BUDGET = "4" }
+
+[targets."emulate/ios"]
+env = { OBSD_IOS_APPLET_CLOSURE = "1" }
