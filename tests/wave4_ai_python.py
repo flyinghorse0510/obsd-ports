@@ -1093,6 +1093,198 @@ async def _verify_a2a_uvicorn_uds() -> None:
 
 asyncio.run(_verify_a2a_uvicorn_uds())
 print("[PYAI-PASS] 5e_swival_a2a_uvicorn_starlette: in-guest uvicorn + Starlette A2A server over OpenBSD AF_UNIX socket OK", flush=True)
+
+# --- 5F. Live In-Guest `swival` (1.0.37) <-> `llama-server` (0.5.0) Cross-Check over http://127.0.0.1:<port>/v1 ---
+import math
+import signal
+import socket
+import struct
+import time
+
+def _synth_swival_gguf(out_path: pathlib.Path) -> None:
+    n_vocab, n_embd, n_head, n_head_kv, n_ff = 320, 64, 2, 2, 128
+    special = ["<unk>", "<s>", "</s>", "<|im_end|>", "<|im_start|>"]
+    byte_toks = [f"<0x{b:02X}>" for b in range(256)]
+    words = [
+        "\n", "\u2581", "\u2581hello", "\u2581OpenBSD_WASM64_OK!", "\u2581OpenBSD",
+        "\u2581WASM64", "\u2581SIMD128", "\u2581AI", "\u2581agent", "\u2581ready", "\u2581Tokyo",
+        "\u2581sunny", "\u2581weather", "\u2581is", "\u2581in", "hello", "Tokyo",
+    ]
+    tokens = list(special) + list(byte_toks) + list(words)
+    for ch in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789?.,!:-_/":
+        if len(tokens) >= n_vocab:
+            break
+        if ch not in tokens:
+            tokens.append(ch)
+    while len(tokens) < n_vocab:
+        tokens.append(f"tok{len(tokens)}")
+    scores = [0.0 if i < 261 else (-0.1 * float(i - 260)) for i in range(n_vocab)]
+    ttypes = [2, 3, 3, 3, 3] + ([6] * 256) + ([1] * (n_vocab - 261))
+    chat_tmpl = (
+        "{% for message in messages %}"
+        "{{ '<|im_start|>' + message['role'] + '\\n' + (message['content'] if message['content'] is string else '') + '<|im_end|>\\n' }}"
+        "{% endfor %}"
+        "{% if add_generation_prompt %}{{ '<|im_start|>assistant\\n' }}{% endif %}"
+    )
+    def gs(s: str) -> bytes:
+        b = s.encode("utf-8")
+        return struct.pack("<Q", len(b)) + b
+    kvs = [
+        gs("general.architecture") + struct.pack("<I", 8) + gs("llama"),
+        gs("general.name") + struct.pack("<I", 8) + gs("tiny-swival-llama"),
+        gs("general.file_type") + struct.pack("<II", 4, 0),
+        gs("llama.vocab_size") + struct.pack("<II", 4, n_vocab),
+        gs("llama.context_length") + struct.pack("<II", 4, 8192),
+        gs("llama.embedding_length") + struct.pack("<II", 4, n_embd),
+        gs("llama.block_count") + struct.pack("<II", 4, 1),
+        gs("llama.feed_forward_length") + struct.pack("<II", 4, n_ff),
+        gs("llama.attention.head_count") + struct.pack("<II", 4, n_head),
+        gs("llama.attention.head_count_kv") + struct.pack("<II", 4, n_head_kv),
+        gs("llama.attention.layer_norm_rms_epsilon") + struct.pack("<If", 6, 1e-5),
+        gs("llama.rope.dimension_count") + struct.pack("<II", 4, n_embd // n_head),
+        gs("llama.rope.freq_base") + struct.pack("<If", 6, 10000.0),
+        gs("tokenizer.ggml.model") + struct.pack("<I", 8) + gs("llama"),
+        gs("tokenizer.ggml.tokens") + struct.pack("<IIQ", 9, 8, len(tokens)) + b"".join(gs(x) for x in tokens),
+        gs("tokenizer.ggml.scores") + struct.pack("<IIQ", 9, 6, len(scores)) + struct.pack(f"<{len(scores)}f", *scores),
+        gs("tokenizer.ggml.token_type") + struct.pack("<IIQ", 9, 5, len(ttypes)) + struct.pack(f"<{len(ttypes)}i", *ttypes),
+        gs("tokenizer.ggml.bos_token_id") + struct.pack("<II", 4, 1),
+        gs("tokenizer.ggml.eos_token_id") + struct.pack("<II", 4, 2),
+        gs("tokenizer.ggml.eot_token_id") + struct.pack("<II", 4, 3),
+        gs("tokenizer.ggml.unknown_token_id") + struct.pack("<II", 4, 0),
+        gs("tokenizer.ggml.add_bos_token") + struct.pack("<IB", 7, 1),
+        gs("tokenizer.chat_template") + struct.pack("<I", 8) + gs(chat_tmpl),
+    ]
+    tok_embd = [1.0 if d == 0 else 0.03 * math.sin(0.17 * (t + 1) * (d + 1)) for t in range(n_vocab) for d in range(n_embd)]
+    out_w = [
+        (-6.0 if t < 263 else (3.5 if t == 264 else 0.2))
+        if d == 0 else 0.01 * math.cos(0.13 * (t + 1) * (d + 1))
+        for t in range(n_vocab) for d in range(n_embd)
+    ]
+    smat = lambda a, b, sd: [0.01 * math.sin(sd + 0.01 * i) for i in range(a * b)]
+    tensors = [
+        ("token_embd.weight", (n_embd, n_vocab), tok_embd),
+        ("output_norm.weight", (n_embd,), [1.0] * n_embd),
+        ("output.weight", (n_embd, n_vocab), out_w),
+        ("blk.0.attn_norm.weight", (n_embd,), [1.0] * n_embd),
+        ("blk.0.attn_q.weight", (n_embd, n_embd), smat(n_embd, n_embd, 0.1)),
+        ("blk.0.attn_k.weight", (n_embd, n_embd), smat(n_embd, n_embd, 0.2)),
+        ("blk.0.attn_v.weight", (n_embd, n_embd), smat(n_embd, n_embd, 0.3)),
+        ("blk.0.attn_output.weight", (n_embd, n_embd), smat(n_embd, n_embd, 0.4)),
+        ("blk.0.ffn_norm.weight", (n_embd,), [1.0] * n_embd),
+        ("blk.0.ffn_gate.weight", (n_embd, n_ff), smat(n_embd, n_ff, 0.5)),
+        ("blk.0.ffn_down.weight", (n_ff, n_embd), smat(n_ff, n_embd, 0.6)),
+        ("blk.0.ffn_up.weight", (n_embd, n_ff), smat(n_embd, n_ff, 0.7)),
+    ]
+    t_infos, t_blobs, off = [], [], 0
+    for name, dims, vals in tensors:
+        raw = struct.pack(f"<{len(vals)}f", *vals)
+        pad = (32 - (len(raw) % 32)) % 32
+        raw_p = raw + (b"\x00" * pad)
+        inf = gs(name) + struct.pack("<I", len(dims)) + b"".join(struct.pack("<Q", d) for d in dims) + struct.pack("<IQ", 0, off)
+        t_infos.append(inf)
+        t_blobs.append(raw_p)
+        off += len(raw_p)
+    hdr = b"GGUF" + struct.pack("<IQQ", 3, len(tensors), len(kvs)) + b"".join(kvs) + b"".join(t_infos)
+    hpad = (32 - (len(hdr) % 32)) % 32
+    out_path.write_bytes(hdr + (b"\x00" * hpad) + b"".join(t_blobs))
+
+assert os.path.exists("/usr/local/bin/llama-server"), "missing /usr/local/bin/llama-server on OpenBSD 8.0"
+gguf_p = pathlib.Path("/tmp/swival_llama_80.gguf")
+_synth_swival_gguf(gguf_p)
+
+# Pick a free loopback TCP port inside guest
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as _s:
+    _s.bind(("127.0.0.1", 0))
+    llama_port = _s.getsockname()[1]
+
+llama_log = pathlib.Path("/tmp/swival_llama_srv.log")
+llama_proc = subprocess.Popen(
+    [
+        "/usr/local/bin/llama-server",
+        "-m", str(gguf_p),
+        "--alias", "tiny-obsd-llama",
+        "--host", "127.0.0.1",
+        "--port", str(llama_port),
+        "--poll", "0",
+        "--threads-http", "2",
+        "-t", "1",
+        "--jinja",
+        "-np", "1",
+        "-c", "8192",
+    ],
+    stdout=llama_log.open("wb"),
+    stderr=subprocess.STDOUT,
+    env=dict(os.environ, MALLOC_OPTIONS="JJ"),
+)
+try:
+    srv_ready = False
+    with httpx.Client(verify=False, timeout=2.0) as _hc:
+        for _ in range(60):
+            try:
+                hr = _hc.get(f"http://127.0.0.1:{llama_port}/health")
+                if hr.status_code == 200 and hr.json().get("status") == "ok":
+                    srv_ready = True
+                    break
+            except Exception:
+                pass
+            if llama_proc.poll() is not None:
+                raise AssertionError(f"llama-server exited early ({llama_proc.returncode}): {llama_log.read_text(errors='replace')}")
+            time.sleep(0.25)
+    assert srv_ready, f"llama-server did not become healthy on 127.0.0.1:{llama_port}: {llama_log.read_text(errors='replace')}"
+
+    ws_llama = pathlib.Path("/tmp/swival_llamacpp_ws")
+    shutil.rmtree(ws_llama, ignore_errors=True)
+    ws_llama.mkdir(parents=True)
+    proc_llama_sw = subprocess.run(
+        [
+            "/usr/local/bin/swival",
+            "--provider", "llamacpp",
+            "--base-url", f"http://127.0.0.1:{llama_port}/v1",
+            "--base-dir", str(ws_llama),
+            "--files", "none",
+            "--commands", "none",
+            "--no-system-prompt",
+            "--no-mcp",
+            "--no-a2a",
+            "--no-subagents",
+            "--no-skills",
+            "--no-memory",
+            "--no-instructions",
+            "--retries", "1",
+            "--max-turns", "2",
+            "--max-output-tokens", "6",
+            "--temperature", "0.0",
+            "--extra-body", json.dumps({"tool_choice": "none", "stop": ["!"]}),
+            "--quiet",
+            "Hello from OpenBSD 8.0",
+        ],
+        stdin=subprocess.DEVNULL,
+        env=dict(os.environ, MALLOC_OPTIONS="JJ", HOME="/tmp/swival_home_llama", PYTHONPYCACHEPREFIX="/tmp/.pycache-0"),
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc_llama_sw.returncode == 0, (
+        f"swival -> llama-server failed (rc={proc_llama_sw.returncode}):\n"
+        f"STDOUT: {proc_llama_sw.stdout}\nSTDERR: {proc_llama_sw.stderr}\nSERVER: {llama_log.read_text(errors='replace')[-1500:]}"
+    )
+    assert "OpenBSD_WASM64_OK" in proc_llama_sw.stdout and len(proc_llama_sw.stdout.strip()) > 0, (
+        f"unexpected swival -> llama-server output: {proc_llama_sw.stdout!r}"
+    )
+finally:
+    llama_proc.terminate()
+    try:
+        with httpx.Client(verify=False, timeout=0.5) as _hc2:
+            _hc2.get(f"http://127.0.0.1:{llama_port}/health")
+    except Exception:
+        pass
+    try:
+        llama_proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        llama_proc.kill()
+        llama_proc.wait()
+
+print(f"[PYAI-PASS] 5f_swival_in_guest_llama_server_e2e: swival 1.0.37 (--provider llamacpp auto-discovery) <-> live in-guest llama-server 0.5.0 (http://127.0.0.1:{llama_port}/v1) -> {proc_llama_sw.stdout.strip()!r} OK", flush=True)
 PY_SWIVAL_SUITE_EOF
 
 # 6. Interactive 80x24 openpty() `swival --repl` (`prompt_toolkit` + `rich` + `/tools` + `/exit`)
@@ -1324,7 +1516,7 @@ def run_version_suite(openbsd_version: str, obsd_root: pathlib.Path, custom_lane
                     "--script-file",
                     str(script_path),
                     "--timeout-ms",
-                    "300000",
+                    "420000",
                 ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,

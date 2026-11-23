@@ -663,6 +663,20 @@ def _prepare_request(
     return protocol, endpoint, headers, body, wire_model, timeout_val
 
 
+_CACHED_SSL_CTX: Optional[Any] = None
+
+
+def _verify_for_endpoint(endpoint: str) -> Any:
+    global _CACHED_SSL_CTX
+    if endpoint.startswith("http://"):
+        return False
+    if _CACHED_SSL_CTX is None:
+        import ssl
+
+        _CACHED_SSL_CTX = ssl.create_default_context()
+    return _CACHED_SSL_CTX
+
+
 def _stream_sync(
     protocol: str,
     endpoint: str,
@@ -673,7 +687,7 @@ def _stream_sync(
     orig_model: str,
 ) -> Iterator[ModelResponse]:
     try:
-        with httpx.Client(timeout=timeout_val, follow_redirects=True) as client:
+        with httpx.Client(timeout=timeout_val, follow_redirects=True, verify=_verify_for_endpoint(endpoint)) as client:
             with client.stream("POST", endpoint, headers=headers, json=body) as resp:
                 if resp.status_code >= 400:
                     err_bytes = resp.read()
@@ -747,7 +761,7 @@ def completion(
         return _stream_sync(protocol, endpoint, headers, body, wire_model, timeout_val, model)
 
     try:
-        with httpx.Client(timeout=timeout_val, follow_redirects=True) as client:
+        with httpx.Client(timeout=timeout_val, follow_redirects=True, verify=_verify_for_endpoint(endpoint)) as client:
             resp = client.post(endpoint, headers=headers, json=body)
     except httpx.TimeoutException as exc:
         raise Timeout(str(exc), llm_provider=protocol, model=model, status_code=408) from exc
@@ -790,7 +804,7 @@ async def _stream_async(
     orig_model: str,
 ) -> AsyncIterator[ModelResponse]:
     try:
-        async with httpx.AsyncClient(timeout=timeout_val, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=timeout_val, follow_redirects=True, verify=_verify_for_endpoint(endpoint)) as client:
             async with client.stream("POST", endpoint, headers=headers, json=body) as resp:
                 if resp.status_code >= 400:
                     err_bytes = await resp.aread()
@@ -858,7 +872,7 @@ async def acompletion(
         return _stream_async(protocol, endpoint, headers, body, wire_model, timeout_val, model)
 
     try:
-        async with httpx.AsyncClient(timeout=timeout_val, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=timeout_val, follow_redirects=True, verify=_verify_for_endpoint(endpoint)) as client:
             resp = await client.post(endpoint, headers=headers, json=body)
     except httpx.TimeoutException as exc:
         raise Timeout(str(exc), llm_provider=protocol, model=model, status_code=408) from exc

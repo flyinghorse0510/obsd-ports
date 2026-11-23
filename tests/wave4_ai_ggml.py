@@ -784,6 +784,8 @@ SRV_PID=$!
 
 cleanup_srv() {
     if [ -n "${SRV_PID:-}" ] && kill -0 "$SRV_PID" 2>/dev/null; then
+        kill -TERM "$SRV_PID" 2>/dev/null || true
+        sleep 0.2
         kill -9 "$SRV_PID" 2>/dev/null || true
         wait "$SRV_PID" 2>/dev/null || true
     fi
@@ -889,10 +891,10 @@ printf '%s\n' "$DL_HELP" | grep -q "base.en" || fail "whisper.cpp-download-ggml-
 # Run whisper-cli + whisper-quantize with our synthetic 16kHz WAV + tiny synthetic GGML whisper model!
 [ -s /tmp/tiny_whisper.bin ] || fail "missing staged /tmp/tiny_whisper.bin"
 [ -s /tmp/test_16k.wav ] || fail "missing staged /tmp/test_16k.wav"
-MALLOC_OPTIONS=JJ whisper-cli -m /tmp/tiny_whisper.bin -f /tmp/test_16k.wav -np >/tmp/w4_ai/w_run.out 2>/tmp/w4_ai/w_run.err
+MALLOC_OPTIONS=JJ whisper-cli -ac 64 -bs 1 -bo 1 -m /tmp/tiny_whisper.bin -f /tmp/test_16k.wav -np >/tmp/w4_ai/w_run.out 2>/tmp/w4_ai/w_run.err
 MALLOC_OPTIONS=JJ whisper-quantize /tmp/tiny_whisper.bin /tmp/w4_ai/tiny_whisper_q4_0.bin q4_0 >/tmp/w4_ai/w_q4.log 2>&1
 [ -s /tmp/w4_ai/tiny_whisper_q4_0.bin ] || fail "whisper-quantize q4_0 failed"
-MALLOC_OPTIONS=JJ whisper-cli -m /tmp/w4_ai/tiny_whisper_q4_0.bin -f /tmp/test_16k.wav -np >/tmp/w4_ai/w_run_q4.out 2>/tmp/w4_ai/w_run_q4.err
+MALLOC_OPTIONS=JJ whisper-cli -ac 64 -bs 1 -bo 1 -m /tmp/w4_ai/tiny_whisper_q4_0.bin -f /tmp/test_16k.wav -np >/tmp/w4_ai/w_run_q4.out 2>/tmp/w4_ai/w_run_q4.err
 pass "07_whisper_cpp_suite" "whisper-cli (FP16 & Q4_0 SIMD128 16kHz WAV transcription!) + whisper-quantize + whisper-server/bench + download script OK"
 
 # 08. `graphics/stable-diffusion.cpp` (`7.9` & `8.0`)

@@ -24,12 +24,38 @@ All build outputs isolate cleanly under `build/openbsd/<OPENBSD_VERSION>/<COMPAT
 
 `make clean` works standalone with zero external dependencies.
 
-## Built & Verified Ports Catalog (53 Ports across OpenBSD 7.8, 7.9 & 8.0)
+## Built & Verified Ports Catalog (77 Ports on OpenBSD 8.0, 64 on 7.9, 63 on 7.8)
 
-All **53 ports** compile with `sdk/bin/obsd-cc` and `sdk/bin/obsd-c++` (including native WASM64 C++17/23 `libc++.a` + `libc++abi.a` with `-fwasm-exceptions` and per-exec constructor initialization) into **75 localized WASM64 applet closures** (**215** command paths on OpenBSD `7.8`, **211** command paths on OpenBSD `7.9` and `8.0`) plus static `.a` developer libraries, headers, `pkg-config` `.pc` metadata, configs, and manual pages:
+All ports compile with `sdk/bin/obsd-cc` and `sdk/bin/obsd-c++` (including native WASM64 C++17/23 `libc++.a` + `libc++abi.a` with `-fwasm-exceptions`, WASM `-msimd128` quantized tensor kernels, and per-exec constructor initialization) into **79 localized WASM64 applet closures** on OpenBSD `8.0` and `7.9` (**78** on `7.8`; **235** command paths on `8.0`, **231** command paths on `7.9` and `7.8`) plus pure-Python site-packages, console scripts, static `.a` developer libraries, headers, `pkg-config` `.pc` metadata, configs, and manual pages:
 
 | Category & Port | OpenBSD 7.8 | OpenBSD 7.9 | OpenBSD 8.0 | Exported Applets, Wrappers & Static Libraries |
 | :--- | :--- | :--- | :--- | :--- |
+| **AI Inference, Speech, Diffusion & Coding Agents** | | | | |
+| `devel/libggml` | `0.9.4` | `0.9.11` | `0.25.3p0` | `libggml.a`, `libggml-cpu.a`, `libggml-base.a`, `ggml.pc` (WASM64 `-msimd128` quantized matmul kernels) |
+| `misc/llama.cpp` | `0.0.6641` | `0.0.8631` | `0.5.0` | `llama`, `llama-cli`, `llama-server`, `llama-simple-chat`, `llama-embedding`, `llama-quantize`, `llama-gguf`, `llama-bench` (+ `llama-completion`, `llama-perplexity`, `llama-fit-params`, `llama-batched-bench`, 70-asset Agentic/MCP WebUI & C++ MCP Client on `8.0`), `libllama.a`, auto VFS `mmap` fallback |
+| `audio/whisper.cpp` | `1.7.6` | `1.8.4` | `1.9.4` | `whisper`, `whisper-cli`, `whisper-server`, `whisper-bench`, `whisper-quantize`, `whisper.cpp-download-ggml-model`, `libwhisper.a` |
+| `graphics/stable-diffusion.cpp` | — | `0.0.537545fac4` | `0.0.899` | `sd`, `sd-cli`, `sd-server`, `libstable-diffusion.a` (`-msimd128`) |
+| `devel/swival` | — | — | `1.0.37` | `swival` autonomous coding agent (`--repl` `prompt_toolkit` + `rich` TUI, OpenAI/Anthropic/Gemini/`llama-server` SSE tool loops, `tiktoken`, `litellm`, `--serve` A2A server) |
+| **Python 3 & Pure-Python Ecosystem** | | | | |
+| `lang/python/3` | `3.12.11` | `3.13.13` | `3.14.7` | `python3.{12,13,14}`, `python3`, `python`, `pydoc3` (static WASM64 CPython: LibreSSL `ssl`/`hashlib`, `sqlite3`, `asyncio`, `subprocess`, `pty`/`termios`, `readline`, `curses`, `zlib`/`bz2`/`lzma`, `pyexpat`) |
+| `devel/py-wcwidth` | `0.2.14` | `0.6.0` | `0.8.3` | `wcwidth` Unicode terminal display widths |
+| `devel/py-prompt_toolkit` | `3.0.51` | `3.0.52` | `3.0.52` | `prompt_toolkit` interactive terminal prompts & REPLs |
+| `textproc/py-mdurl` | `0.1.2` | `0.1.2` | `0.1.2` | `mdurl` URL utilities for Markdown parsers |
+| `textproc/py-markdown-it` | `3.0.0` | `4.0.0` | `4.2.0` | `markdown_it` CommonMark Markdown parser |
+| `textproc/py-pygments` | `2.19.2` | `2.20.0` | `2.21.0` | `pygmentize`, `pygments` syntax highlighting library |
+| `devel/py-rich` | `13.9.4` | `13.9.4` | `15.0.0` | `rich` ANSI terminal formatting, tables & Markdown rendering |
+| `security/py-fast-cipher` | — | — | `0.2.2` | `fast_cipher` pure-Python cipher & secret utilities |
+| `devel/py-certifi` | — | — | `2026.7.22` | `certifi` bound to OpenBSD `/etc/ssl/cert.pem` |
+| `net/py-idna` | — | — | `3.19` | `idna` RFC 5891 internationalized domain names |
+| `devel/py-sniffio` | — | — | `1.3.1` | `sniffio` async event-loop detector |
+| `devel/py-typing-extensions` | — | — | `4.15.0` | `typing_extensions` backported runtime type hints |
+| `net/py-anyio` | — | — | `4.10.0` | `anyio` structured concurrency over `asyncio` |
+| `www/py-h11` | — | — | `0.16.0` | `h11` pure-Python HTTP/1.1 state machine |
+| `www/py-httpcore` | — | — | `1.0.9` | `httpcore` sync/async HTTP & `AF_UNIX` transport |
+| `www/py-httpx` | — | — | `0.28.1` | `httpx` sync/async HTTP/1.1 client |
+| `devel/py-click` | — | — | `8.2.0` | `click` composable CLI toolkit |
+| `www/py-starlette` | — | — | `1.3.1` | `starlette` ASGI web & A2A application framework |
+| `www/py-uvicorn` | — | — | `0.53.0` | `uvicorn` ASGI HTTP & UNIX-domain server |
 | **VCS, Build & Dev** | | | | |
 | `devel/git` | `2.51.0` | `2.53.0` | `2.55.0` | `git`, `git-remote-http`/`https`/`ftp`/`ftps`, `git-{receive,upload}-pack`, `git-shell`, `libgit.a`, `/usr/local/etc/gitconfig` |
 | `devel/gmake` | `4.4.1` | `4.4.1` | `4.4.1` | `gmake` (POSIX pipe jobserver `-jN`) |
@@ -119,7 +145,7 @@ make package OPENBSD_VERSION=8.0
 make package OPENBSD_VERSION=7.9
 make package OPENBSD_VERSION=7.8
 
-# Run SDK + full 53-port WASM64 verification suites (Wave-1 + Foundation + Wave-2 Slices A-D + Wave-3 Sysmon)
+# Run SDK + full 63/64/77-port WASM64 verification suites (Wave-1..Wave-4 GGML AI & Python/Swival)
 make check OPENBSD_VERSION=8.0
 make check OPENBSD_VERSION=7.9
 make check OPENBSD_VERSION=7.8

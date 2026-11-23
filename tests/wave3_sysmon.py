@@ -779,17 +779,17 @@ def verify_host_packaging(openbsd_version: str, lane_dir: pathlib.Path) -> List[
         f"[{openbsd_version}] missing fastfetch neofetch.jsonc preset"
     )
 
-    # Verify total packaged ports == 53
+    # Verify total packaged ports (>= 53; 63 on 7.8, 64 on 7.9, 77 on 8.0 with Wave-4 AI + Python)
     pkg_idx = lane_dir / "packages/index.tsv"
     assert pkg_idx.is_file(), f"[{openbsd_version}] missing {pkg_idx}"
     pkg_rows = [
         ln for ln in pkg_idx.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")
     ]
-    assert len(pkg_rows) == 53, f"[{openbsd_version}] expected 53 packaged ports in {pkg_idx}, got {len(pkg_rows)}"
+    assert len(pkg_rows) >= 53, f"[{openbsd_version}] expected >= 53 packaged ports in {pkg_idx}, got {len(pkg_rows)}"
 
     print(
         f"[SYSMON-HOST] [{openbsd_version}] host artifacts verified: "
-        f"53 packages, {len(themes)} btop themes, 5 manpages, neofetch->#!/usr/local/bin/bash"
+        f"{len(pkg_rows)} packages, {len(themes)} btop themes, 5 manpages, neofetch->#!/usr/local/bin/bash"
     )
     return rows
 

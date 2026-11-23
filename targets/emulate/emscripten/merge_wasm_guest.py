@@ -816,8 +816,9 @@ if (cfg.enableSvnp) {
     const out = Buffer.alloc(28, 0);
     out.writeUInt8(family, 0);
     out.writeUInt16LE((port || 0) & 0xffff, 2);
-    if (family === 4 && ip && ip.includes('.')) {
-      const ps = ip.split('.').map(Number);
+    const normIp = (!ip || ip === '::ffff:127.0.0.1' || ip === '::1') ? '127.0.0.1' : ip.replace(/^::ffff:/, '');
+    if (family === 4 && normIp.includes('.')) {
+      const ps = normIp.split('.').map(Number);
       out[8] = ps[0]; out[9] = ps[1]; out[10] = ps[2]; out[11] = ps[3];
     }
     return out;
@@ -826,7 +827,7 @@ if (cfg.enableSvnp) {
   function decodeAddr(buf, off = 0) {
     const family = buf.readUInt8(off);
     const port = buf.readUInt16LE(off + 2);
-    const ip = family === 4 ? `${buf[off+8]}.${buf[off+9]}.${buf[off+10]}.${buf[off+11]}` : '::1';
+    const ip = family === 4 ? `${buf[off+8]}.${buf[off+9]}.${buf[off+10]}.${buf[off+11]}` : '127.0.0.1';
     return { family, port, ip };
   }
 
@@ -835,10 +836,14 @@ if (cfg.enableSvnp) {
     let mask = 0;
     let avail = 0;
     for (const c of s.rxQueue) avail += c.data.length;
-    if (avail > 0 || s.eof) mask |= 1; // POLLIN
-    if (s.connected && !s.connecting) mask |= 4; // POLLOUT
-    if (s.err) mask |= 8; // POLLERR
-    if (s.eof) mask |= 16; // POLLHUP
+    if (s.listening) {
+      if (s.acceptQueue.length > 0) mask |= 1; // POLLIN on listening socket
+    } else {
+      if (avail > 0 || s.eof) mask |= 1; // POLLIN
+      if (s.connected && !s.connecting) mask |= 4; // POLLOUT
+      if (s.err) mask |= 8; // POLLERR
+      if (s.eof) mask |= 16; // POLLHUP
+    }
     const off = shmOff + SOCKS_BASE_OFF + sockId * SOCK_STRIDE;
     Atomics.store(i32, off >> 2, mask);
     Atomics.store(u32, (off + 4) >> 2, avail >>> 0);
@@ -847,7 +852,7 @@ if (cfg.enableSvnp) {
     Atomics.notify(i32, (off + 12) >> 2, 64);
     Atomics.add(i32, (shmOff + 20) >> 2, 1);
     Atomics.notify(i32, (shmOff + 20) >> 2, 64);
-    while (s.waiters.length > 0 && (avail > 0 || s.eof || s.err)) {
+    while (s.waiters.length > 0 && (avail > 0 || s.eof || s.err || s.acceptQueue.length > 0)) {
       const w = s.waiters.shift();
       w();
     }
@@ -859,7 +864,7 @@ if (cfg.enableSvnp) {
     const stateIdx = slotBase >> 2;
     if (Atomics.load(i32, stateIdx) !== 2) {
       Atomics.store(i32, stateIdx, 0);
-      return;
+      return false;
     }
     const resp = Buffer.alloc(20 + bodyBuf.length);
     resp.writeUInt32LE(SVNP_MAGIC, 0);
@@ -873,6 +878,18 @@ if (cfg.enableSvnp) {
     Atomics.store(i32, (slotBase + 16) >> 2, 0);
     Atomics.store(i32, stateIdx, 3);
     Atomics.notify(i32, stateIdx, 1);
+    return true;
+  }
+
+  function attachTcpSocket(id, s, sock) {
+    s.tcp = sock;
+    sock.on('data', (chunk) => {
+      s.rxQueue.push({ data: Buffer.from(chunk), addr: null });
+      updateSockState(id, s);
+    });
+    sock.on('end', () => { s.eof = true; updateSockState(id, s); });
+    sock.on('close', () => { s.eof = true; updateSockState(id, s); });
+    sock.on('error', () => { s.err = 54; updateSockState(id, s); });
   }
 
   async function handleReq(slotIdx, frame) {
@@ -887,7 +904,12 @@ if (cfg.enableSvnp) {
       if (domain !== 4 && domain !== 6) return finishSlot(slotIdx, reqId, 0, 47);
       if (type !== 1 && type !== 2) return finishSlot(slotIdx, reqId, 0, 44);
       const id = nextSockId++;
-      const s = { id, domain, type, tcp: null, udp: null, connected: type === 2, connecting: false, eof: false, err: 0, rxQueue: [], waiters: [], peer: null };
+      const s = {
+        id, domain, type, tcp: null, udp: null, srv: null,
+        connected: type === 2, connecting: false, listening: false,
+        eof: false, err: 0, rxQueue: [], acceptQueue: [], acceptWaiters: [], waiters: [],
+        local: { ip: '127.0.0.1', port: 0 }, peer: null,
+      };
       if (type === 2) {
         const u = dgram.createSocket(domain === 6 ? 'udp6' : 'udp4');
         s.udp = u;
@@ -926,6 +948,103 @@ if (cfg.enableSvnp) {
     const s = socks.get(sockId);
     if (!s) return finishSlot(slotIdx, reqId, sockId, 9);
 
+    if (op === 0x03) { // BIND
+      const reqAddr = decodeAddr(body, 0);
+      const bindHost = (reqAddr.ip === '0.0.0.0' || !reqAddr.ip) ? '127.0.0.1' : reqAddr.ip;
+      if (s.type === 2 && s.udp) {
+        try {
+          await new Promise((resolve, reject) => {
+            s.udp.once('error', reject);
+            s.udp.bind(reqAddr.port, bindHost, () => { s.udp.removeListener('error', reject); resolve(); });
+          });
+          const a = s.udp.address();
+          s.local = { ip: a.address, port: a.port };
+          return finishSlot(slotIdx, reqId, sockId, 0, encodeAddr(s.local.ip, s.local.port, 4));
+        } catch {
+          return finishSlot(slotIdx, reqId, sockId, 48 /* EADDRINUSE */);
+        }
+      }
+      const srv = net.createServer({ allowHalfOpen: true });
+      srv.on('connection', (connSock) => {
+        if (!s.listening) {
+          connSock.destroy();
+          return;
+        }
+        s.acceptQueue.push(connSock);
+        updateSockState(sockId, s);
+        while (s.acceptWaiters.length > 0 && s.acceptQueue.length > 0) {
+          const aw = s.acceptWaiters.shift();
+          aw();
+        }
+      });
+      srv.on('error', () => {});
+      try {
+        await new Promise((resolve, reject) => {
+          const onErr = (e) => { srv.removeListener('listening', onListen); reject(e); };
+          const onListen = () => { srv.removeListener('error', onErr); resolve(); };
+          srv.once('error', onErr);
+          srv.once('listening', onListen);
+          srv.listen({ host: bindHost, port: reqAddr.port, exclusive: false });
+        });
+        s.srv = srv;
+        const a = srv.address();
+        s.local = { ip: (a && a.address) ? a.address : bindHost, port: (a && a.port) ? a.port : reqAddr.port };
+        return finishSlot(slotIdx, reqId, sockId, 0, encodeAddr(s.local.ip, s.local.port, 4));
+      } catch {
+        try { srv.close(); } catch {}
+        return finishSlot(slotIdx, reqId, sockId, 48 /* EADDRINUSE */);
+      }
+    }
+
+    if (op === 0x05) { // LISTEN
+      if (!s.srv) return finishSlot(slotIdx, reqId, sockId, 22 /* EINVAL */);
+      s.listening = true;
+      updateSockState(sockId, s);
+      return finishSlot(slotIdx, reqId, sockId, 0);
+    }
+
+    if (op === 0x06) { // ACCEPT
+      if (!s.srv || !s.listening) return finishSlot(slotIdx, reqId, sockId, 22 /* EINVAL */);
+      const nonblock = body.length > 0 && body.readUInt8(0) !== 0;
+      const tryAccept = () => {
+        const { i32 } = getViews();
+        const slotBase = shmOff + SLOTS_BASE_OFF + slotIdx * SLOT_STRIDE;
+        if (Atomics.load(i32, slotBase >> 2) !== 2) {
+          Atomics.store(i32, slotBase >> 2, 0);
+          return true;
+        }
+        if (!s.srv || !s.listening) {
+          finishSlot(slotIdx, reqId, sockId, 22 /* EINVAL */);
+          return true;
+        }
+        if (s.acceptQueue.length === 0) return false;
+        const connSock = s.acceptQueue.shift();
+        updateSockState(sockId, s);
+        const nid = nextSockId++;
+        const peerIp = connSock.remoteAddress || '127.0.0.1';
+        const peerPort = connSock.remotePort || 0;
+        const ns = {
+          id: nid, domain: s.domain, type: s.type, tcp: null, udp: null, srv: null,
+          connected: true, connecting: false, listening: false,
+          eof: false, err: 0, rxQueue: [], acceptQueue: [], acceptWaiters: [], waiters: [],
+          local: { ip: connSock.localAddress || s.local.ip, port: connSock.localPort || s.local.port },
+          peer: { ip: peerIp, port: peerPort, family: 4 },
+        };
+        socks.set(nid, ns);
+        attachTcpSocket(nid, ns, connSock);
+        updateSockState(nid, ns);
+        const resp = Buffer.alloc(32, 0);
+        resp.writeUInt32LE(nid, 0);
+        encodeAddr(peerIp, peerPort, 4).copy(resp, 4);
+        finishSlot(slotIdx, reqId, sockId, 0, resp);
+        return true;
+      };
+      if (tryAccept()) return;
+      if (nonblock) return finishSlot(slotIdx, reqId, sockId, 35 /* EAGAIN */);
+      s.acceptWaiters.push(() => { tryAccept(); });
+      return;
+    }
+
     if (op === 0x04) { // CONNECT
       const dst = decodeAddr(body, 0);
       const nonblock = body.readUInt8(28) !== 0;
@@ -944,13 +1063,19 @@ if (cfg.enableSvnp) {
       sock.on('end', () => { s.eof = true; updateSockState(sockId, s); });
       sock.on('close', () => { s.eof = true; updateSockState(sockId, s); });
       if (nonblock) {
-        sock.once('connect', () => { s.connecting = false; s.connected = true; updateSockState(sockId, s); });
+        sock.once('connect', () => {
+          s.connecting = false; s.connected = true;
+          s.local = { ip: sock.localAddress || '127.0.0.1', port: sock.localPort || 0 };
+          updateSockState(sockId, s);
+        });
         sock.on('error', () => { s.connecting = false; s.err = 61; updateSockState(sockId, s); });
         return finishSlot(slotIdx, reqId, sockId, 36 /* EINPROGRESS */);
       }
       sock.once('connect', () => {
-        s.connecting = false; s.connected = true; updateSockState(sockId, s);
-        finishSlot(slotIdx, reqId, sockId, 0, encodeAddr(sock.localAddress || '127.0.0.1', sock.localPort || 0, 4));
+        s.connecting = false; s.connected = true;
+        s.local = { ip: sock.localAddress || '127.0.0.1', port: sock.localPort || 0 };
+        updateSockState(sockId, s);
+        finishSlot(slotIdx, reqId, sockId, 0, encodeAddr(s.local.ip, s.local.port, 4));
       });
       sock.once('error', () => {
         s.connecting = false; s.err = 61; updateSockState(sockId, s);
@@ -1034,12 +1159,63 @@ if (cfg.enableSvnp) {
       else if (level === 1 && opt === 12) { b.writeInt32LE(s.type, 0); }
       return finishSlot(slotIdx, reqId, sockId, 0, b);
     }
-    if (op === 0x0b) return finishSlot(slotIdx, reqId, sockId, 0, encodeAddr('127.0.0.1', 0, 4));
+    if (op === 0x0b) return finishSlot(slotIdx, reqId, sockId, 0, encodeAddr(s.local.ip, s.local.port, 4));
     if (op === 0x0c) return finishSlot(slotIdx, reqId, sockId, s.peer ? 0 : 57, s.peer ? encodeAddr(s.peer.ip, s.peer.port, 4) : Buffer.alloc(0));
-    if (op === 0x0d) { if (s.tcp) s.tcp.end(); return finishSlot(slotIdx, reqId, sockId, 0); }
+    if (op === 0x0d) { // SHUTDOWN
+      const how = body.length > 0 ? body.readUInt8(0) : 2;
+      if (s.srv) {
+        const srv = s.srv;
+        s.srv = null;
+        s.listening = false;
+        s.eof = true;
+        s.err = 22;
+        for (const q of s.acceptQueue) { try { q.destroy(); } catch {} }
+        s.acceptQueue.length = 0;
+        updateSockState(sockId, s);
+        while (s.acceptWaiters.length > 0) {
+          const aw = s.acceptWaiters.shift();
+          aw();
+        }
+        await new Promise((r) => srv.close(() => r()));
+      } else if (s.tcp) {
+        if (how === 1) {
+          s.tcp.end();
+        } else {
+          s.eof = true;
+          s.tcp.destroy();
+          updateSockState(sockId, s);
+          while (s.waiters.length > 0) {
+            const w = s.waiters.shift();
+            w();
+          }
+        }
+      }
+      return finishSlot(slotIdx, reqId, sockId, 0);
+    }
     if (op === 0x0e) { // CLOSE
+      s.eof = true;
+      s.err = 9;
+      s.listening = false;
       if (s.tcp) s.tcp.destroy();
       if (s.udp) try { s.udp.close(); } catch {}
+      if (s.srv) {
+        const srv = s.srv;
+        s.srv = null;
+        for (const q of s.acceptQueue) { try { q.destroy(); } catch {} }
+        s.acceptQueue.length = 0;
+        updateSockState(sockId, s);
+        while (s.acceptWaiters.length > 0) {
+          const aw = s.acceptWaiters.shift();
+          aw();
+        }
+        await new Promise((r) => srv.close(() => r()));
+      } else {
+        updateSockState(sockId, s);
+      }
+      while (s.waiters.length > 0) {
+        const w = s.waiters.shift();
+        w();
+      }
       socks.delete(sockId);
       return finishSlot(slotIdx, reqId, sockId, 0);
     }
