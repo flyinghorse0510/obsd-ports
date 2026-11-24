@@ -39,6 +39,16 @@ obsd-ports/
 └── tests/                          # Automated dual-release WASM64 port test suite
 ```
 
+## 3D Matrix (`OPENBSD_VERSION x COMPAT_BACKEND x COMPAT_PAL` = 21 Lanes) & `extra/` Section
+
+1. **Release Axis (`config/versions/index.tsv`)**: OpenBSD `8.0` (`80` total ports: `77` `ports/*` + `3` `extra/*`), `7.9` (`67` total ports: `64` `ports/*` + `3` `extra/*`), and `7.8` (`66` total ports: `63` `ports/*` + `3` `extra/*`).
+2. **Backend x PAL Matrix (`config/matrix/index.tsv`)**: 7 cells (`3 x 7 = 21` total lanes):
+   - `emulate/{emscripten,wasi,darwin,ios}` (`COMPAT_PRODUCES_APPLETS := 1`, relocatable multi-call applet closures; `emulate/emscripten` active WASM64 lane, `ios` enforces strict W^X zero-JIT invariants).
+   - `translate/{darwin,ios,linux}` (`COMPAT_PRODUCES_APPLETS := 0`, standalone boundary executables).
+3. **Dual Port Sections (`SECTION=all|ports|extra`)**:
+   - `ports/<category>/<name>/port.toml` builds against immutable upstream metadata in `vendor/openbsd/versions/<ver>/ports/`.
+   - `extra/<category>/<name>/` hosts self-contained OpenBSD-style ports (`Makefile`, `crates.inc`, `distinfo`, `pkg/DESCR`, `pkg/PLIST`, `patches/patch-*`, `port.toml`) indexed in `config/extra/index.tsv` and audited by `tools/audit/audit_extra_ports.py` (currently `devel/forgecode` `2.14.0`, `devel/goose` `1.60.2`, and `misc/aichat` `0.30.0`).
+
 ## Immutable Vendor Tracking Strategy
 
 Full OpenBSD `ports.tar.gz` archives contain ~220,000 tiny files per release (~440,000 files across `7.8` and `7.9`). To keep Git fast while retaining 100% upstream fidelity:

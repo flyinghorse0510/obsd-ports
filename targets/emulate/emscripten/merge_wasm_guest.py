@@ -599,6 +599,7 @@ def build_and_cache_test_runtime(
     port_rows = parse_ports_applets_tsv(ports_lane_dir)
 
     h = hashlib.sha256()
+    h.update(b"pthread_pool=64:init_mem=536870912")
     h.update(f"{base_ar.stat().st_mtime_ns}:{host_ar.stat().st_mtime_ns}".encode())
     h.update(",".join(sorted(MINIMAL_BASE_SYMS)).encode())
     h.update(HOST_RUNNER_C.encode())
@@ -679,10 +680,10 @@ def build_and_cache_test_runtime(
             "-sEXPORT_ES6=1",
             "-sENVIRONMENT=node",
             "-sALLOW_MEMORY_GROWTH=1",
-            "-sINITIAL_MEMORY=268435456",
+            "-sINITIAL_MEMORY=536870912",
             "-sMAXIMUM_MEMORY=4294967296",
             "-sSTACK_SIZE=1048576",
-            "-sPTHREAD_POOL_SIZE=32",
+            "-sPTHREAD_POOL_SIZE=64",
             "-sEXIT_RUNTIME=0",
             f"-sEXPORTED_FUNCTIONS={exported_fns}",
             f"-sEXPORTED_RUNTIME_METHODS={exported_rt}",

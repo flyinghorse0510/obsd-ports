@@ -1,8 +1,8 @@
-# Declarative Port Recipe Contract (`ports/<portpath>/port.toml`)
+# Declarative Port Recipe Contract (`ports/<portpath>/port.toml` & `extra/<portpath>/port.toml`)
 
-Each ported package lives at `ports/<portpath>/port.toml` (supporting both 2-level paths like `ports/archivers/bzip2/port.toml` and 3-level paths like `ports/lang/lua/5.4/port.toml`).
+Each ported package lives either at `ports/<portpath>/port.toml` (backed by immutable `vendor/openbsd/versions/$(OPENBSD_VERSION)/ports/<vendor_port>/`) or as a self-contained OpenBSD-style port under `extra/<portpath>/` (`Makefile`, optional `crates.inc`, `distinfo`, `pkg/DESCR`, `pkg/PLIST`, optional `patches/patch-*`, and `port.toml`, indexed in `config/extra/index.tsv`).
 
-A single `port.toml` builds against OpenBSD `7.8`, `7.9`, and `8.0` automatically: `tools/build_ports.py` reads the release-specific `distinfo`, `Makefile`, and `patches/patch-*` from `vendor/openbsd/versions/$(OPENBSD_VERSION)/ports/<vendor_port>/`.
+A single `port.toml` parameterizes cleanly across all **21 lanes** (`OPENBSD_VERSION ∈ {7.8, 7.9, 8.0}` x 7 `(COMPAT_BACKEND, COMPAT_PAL)` cells: `emulate/{emscripten,wasi,darwin,ios}` and `translate/{darwin,ios,linux}`).
 
 ## Schema Reference
 

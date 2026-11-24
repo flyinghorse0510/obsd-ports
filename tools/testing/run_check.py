@@ -125,9 +125,7 @@ def main() -> int:
             return rc_sdk
 
     suite_py = REPO_ROOT / "tests/run_wasm_ports_tests.py"
-    if not suite_py.is_file():
-        print(f"[check/{args.openbsd_version}] tests/run_wasm_ports_tests.py not yet present; SDK check passed")
-        return 0
+    wave5_extra_py = REPO_ROOT / "tests/wave5_extra_ai_agents.py"
 
     env = dict(os.environ)
     env["OBSD_PORTS_ROOT"] = str(REPO_ROOT)
@@ -146,65 +144,95 @@ def main() -> int:
     path_parts.append(env.get("PATH", "/usr/bin:/bin"))
     env["PATH"] = ":".join(path_parts)
 
-    # Inspect supported CLI arguments of `tests/run_wasm_ports_tests.py` so both
-    # `--openbsd-version` and `--version` / `--release` conventions work seamlessly.
-    help_proc = subprocess.run(
-        [sys.executable, "-I", str(suite_py), "--help"],
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    help_txt = help_proc.stdout or ""
+    norm_port = args.port.strip().strip("/")
+    is_extra_port = False
+    if norm_port:
+        if norm_port.startswith("extra/"):
+            is_extra_port = True
+        elif not norm_port.startswith("ports/") and (REPO_ROOT / "extra" / norm_port / "port.toml").is_file():
+            is_extra_port = True
 
-    cmd = [sys.executable, "-I", str(suite_py)]
-    if "--openbsd-version" in help_txt:
-        cmd.extend(["--openbsd-version", args.openbsd_version])
-    elif "--version" in help_txt:
-        cmd.extend(["--version", args.openbsd_version])
-    elif "--release" in help_txt:
-        cmd.extend(["--release", args.openbsd_version])
+    if args.section in ("all", "ports") and not is_extra_port:
+        if not suite_py.is_file():
+            print(f"[check/{args.openbsd_version}] tests/run_wasm_ports_tests.py not yet present; SDK check passed")
+            return 0
 
-    if "--libobsdcompat-root" in help_txt:
-        cmd.extend(["--libobsdcompat-root", str(obsd_root)])
-    if "--jobs" in help_txt:
-        cmd.extend(["--jobs", str(args.jobs)])
-    if args.port and "--port" in help_txt:
-        cmd.extend(["--port", args.port])
+        # Inspect supported CLI arguments of `tests/run_wasm_ports_tests.py` so both
+        # `--openbsd-version` and `--version` / `--release` conventions work seamlessly.
+        help_proc = subprocess.run(
+            [sys.executable, "-I", str(suite_py), "--help"],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        help_txt = help_proc.stdout or ""
 
-    rc_main = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env).returncode
-    if rc_main != 0:
-        return rc_main
+        cmd = [sys.executable, "-I", str(suite_py)]
+        if "--openbsd-version" in help_txt:
+            cmd.extend(["--openbsd-version", args.openbsd_version])
+        elif "--version" in help_txt:
+            cmd.extend(["--version", args.openbsd_version])
+        elif "--release" in help_txt:
+            cmd.extend(["--release", args.openbsd_version])
 
-    if not args.port:
-        wave2_suites = [
-            "tests/wave2_dev.py",
-            "tests/wave2_search_gnu.py",
-            "tests/wave2_net_arch.py",
-            "tests/wave2_sys_tui.py",
-            "tests/wave3_sysmon.py",
-            "tests/wave4_ai_ggml.py",
-            "tests/wave4_ai_python.py",
-        ]
-        for rel_suite in wave2_suites:
-            sp_path = REPO_ROOT / rel_suite
-            if not sp_path.is_file():
-                continue
-            rc_w2 = subprocess.run(
-                [
-                    sys.executable,
-                    "-I",
-                    str(sp_path),
-                    "--openbsd-version",
-                    args.openbsd_version,
-                    "--libobsdcompat-root",
-                    str(obsd_root),
-                ],
-                cwd=str(REPO_ROOT),
-                env=env,
-            ).returncode
-            if rc_w2 != 0:
-                return rc_w2
+        if "--libobsdcompat-root" in help_txt:
+            cmd.extend(["--libobsdcompat-root", str(obsd_root)])
+        if "--jobs" in help_txt:
+            cmd.extend(["--jobs", str(args.jobs)])
+        if args.port and "--port" in help_txt:
+            cmd.extend(["--port", args.port])
+
+        rc_main = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env).returncode
+        if rc_main != 0:
+            return rc_main
+
+        if not args.port:
+            wave2_suites = [
+                "tests/wave2_dev.py",
+                "tests/wave2_search_gnu.py",
+                "tests/wave2_net_arch.py",
+                "tests/wave2_sys_tui.py",
+                "tests/wave3_sysmon.py",
+                "tests/wave4_ai_ggml.py",
+                "tests/wave4_ai_python.py",
+            ]
+            for rel_suite in wave2_suites:
+                sp_path = REPO_ROOT / rel_suite
+                if not sp_path.is_file():
+                    continue
+                rc_w2 = subprocess.run(
+                    [
+                        sys.executable,
+                        "-I",
+                        str(sp_path),
+                        "--openbsd-version",
+                        args.openbsd_version,
+                        "--libobsdcompat-root",
+                        str(obsd_root),
+                    ],
+                    cwd=str(REPO_ROOT),
+                    env=env,
+                ).returncode
+                if rc_w2 != 0:
+                    return rc_w2
+
+    if args.section in ("all", "extra") and (not args.port or is_extra_port):
+        if wave5_extra_py.is_file():
+            w5_cmd = [
+                sys.executable,
+                "-I",
+                str(wave5_extra_py),
+                "--openbsd-version",
+                args.openbsd_version,
+                "--libobsdcompat-root",
+                str(obsd_root),
+            ]
+            if args.port:
+                w5_cmd.extend(["--port", args.port])
+            rc_w5 = subprocess.run(w5_cmd, cwd=str(REPO_ROOT), env=env).returncode
+            if rc_w5 != 0:
+                return rc_w5
 
     return 0
 

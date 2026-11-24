@@ -1,16 +1,16 @@
 # `obsd-ports` — Multi-Release, Multi-Backend OpenBSD Ports Builder & SDK
 
-`obsd-ports` cross-compiles and packages authentic OpenBSD release ports (`7.8`, `7.9`, `8.0`, and future releases) against [`libobsdcompat`](../libobsdcompat) without modifying upstream OpenBSD vendor metadata.
+`obsd-ports` cross-compiles and packages authentic OpenBSD release ports (`7.8`, `7.9`, `8.0`, and future releases) alongside first-class self-contained `extra/` ports against [`libobsdcompat`](../libobsdcompat) without modifying upstream OpenBSD vendor metadata.
 
-## Multi-Axis Architecture
+## Multi-Axis Architecture (`3 Releases x 7 Backend/PAL Cells = 21 Lanes`)
 
 Every build is parameterized cleanly across three orthogonal axes:
 
-1. **OpenBSD Release (`OPENBSD_VERSION`)**: `8.0` (default), `7.9`, `7.8` — declared in [`config/versions/index.tsv`](config/versions/index.tsv), backed by SHA256-verified official OpenBSD `ports.tar.gz` catalogs (`config/versions/<ver>-catalog.tsv`, ~10,400–10,750+ ports per release) and immutable port subtrees under `vendor/openbsd/versions/<ver>/ports/`.
-2. **Compatibility Backend (`COMPAT_BACKEND`)**: `emulate` (default, crunched multi-call relocatable applets) and `translate` (standalone executables).
-3. **Platform Abstraction Layer (`COMPAT_PAL`)**: `emscripten` (active v1 WASM64 browser & Node.js guest), with clean target seams for `wasi`, `darwin`, and `linux` declared in [`config/matrix/index.tsv`](config/matrix/index.tsv).
+1. **OpenBSD Release (`OPENBSD_VERSION`)**: `8.0` (default), `7.9`, `7.8` — declared in [`config/versions/index.tsv`](config/versions/index.tsv), backed by SHA256-verified official OpenBSD `ports.tar.gz` catalogs (`config/versions/<ver>-catalog.tsv`, ~10,400–10,750+ ports per release), immutable port subtrees under `vendor/openbsd/versions/<ver>/ports/`, and self-contained W^X JIT-free extra ports under [`extra/`](extra/) ([`config/extra/index.tsv`](config/extra/index.tsv)).
+2. **Compatibility Backend (`COMPAT_BACKEND`)**: `emulate` (default, crunched multi-call relocatable applets) and `translate` (standalone boundary executables).
+3. **Platform Abstraction Layer (`COMPAT_PAL`)**: `emscripten` (active v1 WASM64 browser & Node.js guest), with 7-cell 3D matrix seams across `emulate/{emscripten,wasi,darwin,ios}` and `translate/{darwin,ios,linux}` (`3 x 7 = 21` lanes) declared in [`config/matrix/index.tsv`](config/matrix/index.tsv).
 
-All build outputs isolate cleanly under `build/openbsd/<OPENBSD_VERSION>/<COMPAT_BACKEND>/<COMPAT_PAL>/`.
+All build outputs isolate cleanly under `build/openbsd/<OPENBSD_VERSION>/<COMPAT_BACKEND>/<COMPAT_PAL>/`, with `SECTION=all|ports|extra` selecting both or individual port trees.
 
 ## Declaring `libobsdcompat` (Declared, Never Searched)
 
@@ -24,9 +24,9 @@ All build outputs isolate cleanly under `build/openbsd/<OPENBSD_VERSION>/<COMPAT
 
 `make clean` works standalone with zero external dependencies.
 
-## Built & Verified Ports Catalog (77 Ports on OpenBSD 8.0, 64 on 7.9, 63 on 7.8)
+## Built & Verified Ports Catalog (80 Ports on OpenBSD 8.0, 67 on 7.9, 66 on 7.8)
 
-All ports compile with `sdk/bin/obsd-cc` and `sdk/bin/obsd-c++` (including native WASM64 C++17/23 `libc++.a` + `libc++abi.a` with `-fwasm-exceptions`, WASM `-msimd128` quantized tensor kernels, and per-exec constructor initialization) into **79 localized WASM64 applet closures** on OpenBSD `8.0` and `7.9` (**78** on `7.8`; **235** command paths on `8.0`, **231** command paths on `7.9` and `7.8`) plus pure-Python site-packages, console scripts, static `.a` developer libraries, headers, `pkg-config` `.pc` metadata, configs, and manual pages:
+All ports compile with `sdk/bin/obsd-cc`, `sdk/bin/obsd-c++`, and `sdk/bin/obsd-cargo` (including native WASM64 C++17/23 `libc++.a` + `libc++abi.a` with `-fwasm-exceptions`, WASM `-msimd128` quantized tensor kernels, hermetic `-Z build-std=std,panic_abort` Rust WASM64 OpenBSD LP64 cross-compilation, and per-exec constructor/`thread_local!` banking) into **82 localized WASM64 applet closures** on OpenBSD `8.0` and `7.9` (**81** on `7.8`; **239** command paths on `8.0`, **235** command paths on `7.9` and `7.8`) plus pure-Python site-packages, console scripts, static `.a` developer libraries, headers, `pkg-config` `.pc` metadata, completions, configs, and manual pages:
 
 | Category & Port | OpenBSD 7.8 | OpenBSD 7.9 | OpenBSD 8.0 | Exported Applets, Wrappers & Static Libraries |
 | :--- | :--- | :--- | :--- | :--- |
@@ -36,6 +36,9 @@ All ports compile with `sdk/bin/obsd-cc` and `sdk/bin/obsd-c++` (including nativ
 | `audio/whisper.cpp` | `1.7.6` | `1.8.4` | `1.9.4` | `whisper`, `whisper-cli`, `whisper-server`, `whisper-bench`, `whisper-quantize`, `whisper.cpp-download-ggml-model`, `libwhisper.a` |
 | `graphics/stable-diffusion.cpp` | — | `0.0.537545fac4` | `0.0.899` | `sd`, `sd-cli`, `sd-server`, `libstable-diffusion.a` (`-msimd128`) |
 | `devel/swival` | — | — | `1.0.37` | `swival` autonomous coding agent (`--repl` `prompt_toolkit` + `rich` TUI, OpenAI/Anthropic/Gemini/`llama-server` SSE tool loops, `tiktoken`, `litellm`, `--serve` A2A server) |
+| `extra/devel/goose` | `1.60.2` | `1.60.2` | `1.60.2` | `goose` (`block/goose` 100% JIT-free Rust AI agent: `developer` tools, `boa_engine` JS `code-mode`, MCP, SQLite `sessions.db`) |
+| `extra/devel/forgecode` | `2.14.0` | `2.14.0` | `2.14.0` | `forge`, `forgecode` (`antinomyhq/forge` 100% JIT-free Rust coding agent: `read`/`fs_search`/`write`/`patch`/`shell`, zsh plugin/theme, SQLite `.forge.db`) |
+| `extra/misc/aichat` | `0.30.0` | `0.30.0` | `0.30.0` | `aichat` (`sigoden/aichat` 100% JIT-free Rust LLM CLI: SSE chat, `-e` shell assistant, `--session`, `hnsw_rs` `--rag`, `--agent`, PTY `--repl`, `--serve` Playground/Arena WebUI) |
 | **Python 3 & Pure-Python Ecosystem** | | | | |
 | `lang/python/3` | `3.12.11` | `3.13.13` | `3.14.7` | `python3.{12,13,14}`, `python3`, `python`, `pydoc3` (static WASM64 CPython: LibreSSL `ssl`/`hashlib`, `sqlite3`, `asyncio`, `subprocess`, `pty`/`termios`, `readline`, `curses`, `zlib`/`bz2`/`lzma`, `pyexpat`) |
 | `devel/py-wcwidth` | `0.2.14` | `0.6.0` | `0.8.3` | `wcwidth` Unicode terminal display widths |
@@ -126,15 +129,16 @@ make list-catalog OPENBSD_VERSION=8.0 FILTER=jq
 # Import an unmodified OpenBSD port subtree for all active releases (7.8 + 7.9 + 8.0)
 make import PORT=textproc/jq
 
-# List declared port recipes under ports/ and their lane build status
+# List declared port recipes under ports/ + extra/ (or extra/ only) and their lane build status
 make list OPENBSD_VERSION=8.0
 make list OPENBSD_VERSION=7.9
 make list OPENBSD_VERSION=7.8
+make list-extra OPENBSD_VERSION=8.0
 
-# Fetch & verify distfile SHA256 digests against vendor/.../distinfo
+# Fetch & verify distfile SHA256 digests against vendor/.../distinfo and extra/.../distinfo
 make fetch OPENBSD_VERSION=8.0
 
-# Cross-compile & stage ports into build/openbsd/<ver>/emulate/emscripten/stage
+# Cross-compile & stage ports into build/openbsd/<ver>/emulate/emscripten/stage (SECTION=all|ports|extra)
 make build OPENBSD_VERSION=8.0
 make build OPENBSD_VERSION=7.9
 make build OPENBSD_VERSION=7.8
@@ -145,12 +149,13 @@ make package OPENBSD_VERSION=8.0
 make package OPENBSD_VERSION=7.9
 make package OPENBSD_VERSION=7.8
 
-# Run SDK + full 63/64/77-port WASM64 verification suites (Wave-1..Wave-4 GGML AI & Python/Swival)
+# Run SDK + full 66/67/80-port WASM64 verification suites (Wave-1..Wave-5 Extra AI Agents)
 make check OPENBSD_VERSION=8.0
 make check OPENBSD_VERSION=7.9
 make check OPENBSD_VERSION=7.8
+make check SECTION=extra OPENBSD_VERSION=8.0
 
-# Run vendor immutability, Make hierarchy, layout, and matrix seam audits
+# Run vendor immutability, extra ports anatomy, Make hierarchy, layout, and 21-lane matrix seam audits
 make audit
 
 # Remove build/ (standalone)
