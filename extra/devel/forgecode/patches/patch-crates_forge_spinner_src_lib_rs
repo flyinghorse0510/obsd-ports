@@ -1,0 +1,133 @@
+Index: crates/forge_spinner/src/lib.rs
+--- crates/forge_spinner/src/lib.rs.orig
++++ crates/forge_spinner/src/lib.rs
+@@ -1,3 +1,4 @@
++use std::io::IsTerminal;
+ use std::sync::Arc;
+ use std::sync::atomic::{AtomicBool, Ordering};
+ use std::thread::{self, JoinHandle};
+@@ -78,41 +79,48 @@
+     fn start(printer: Arc<P>, accumulated_elapsed: Duration, message: String) -> Self {
+         let stop = Arc::new(AtomicBool::new(false));
+         let paused = Arc::new(AtomicBool::new(false));
+-        let stop_signal = Arc::clone(&stop);
+-        let paused_signal = Arc::clone(&paused);
+-        let thread_printer = Arc::clone(&printer);
+         let started_at = Instant::now();
+ 
+-        let handle = thread::spawn(move || {
+-            loop {
+-                if stop_signal.load(Ordering::Acquire) {
+-                    break;
++        let enable_thread = !cfg!(target_arch = "wasm64") && std::io::stderr().is_terminal();
++        let handle = if enable_thread {
++            let stop_signal = Arc::clone(&stop);
++            let paused_signal = Arc::clone(&paused);
++            let thread_printer = Arc::clone(&printer);
++
++            Some(thread::spawn(move || {
++                loop {
++                    if stop_signal.load(Ordering::Acquire) {
++                        break;
++                    }
++
++                    if paused_signal.load(Ordering::Acquire) {
++                        thread::park_timeout(Duration::from_millis(TICK_DURATION_MS));
++                        continue;
++                    }
++
++                    let elapsed = accumulated_elapsed + started_at.elapsed();
++                    let tick_index = ((elapsed.as_millis() / TICK_DURATION_MS as u128)
++                        % TICKS.len() as u128) as usize;
++                    let tick = TICKS.get(tick_index).unwrap_or(&"⠋");
++                    let line = styled_loader_line(tick, &message, elapsed, terminal_width());
++
++                    if !stop_signal.load(Ordering::Acquire) && !paused_signal.load(Ordering::Acquire)
++                    {
++                        let _ = thread_printer.write_err(format!("\r\x1b[2K{line}").as_bytes());
++                        let _ = thread_printer.flush_err();
++                    }
++
++                    thread::park_timeout(Duration::from_millis(TICK_DURATION_MS));
+                 }
+-
+-                if paused_signal.load(Ordering::Acquire) {
+-                    thread::park_timeout(Duration::from_millis(TICK_DURATION_MS));
+-                    continue;
+-                }
+-
+-                let elapsed = accumulated_elapsed + started_at.elapsed();
+-                let tick_index = ((elapsed.as_millis() / TICK_DURATION_MS as u128)
+-                    % TICKS.len() as u128) as usize;
+-                let tick = TICKS.get(tick_index).unwrap_or(&"⠋");
+-                let line = styled_loader_line(tick, &message, elapsed, terminal_width());
+-
+-                if !stop_signal.load(Ordering::Acquire) && !paused_signal.load(Ordering::Acquire) {
+-                    let _ = thread_printer.write_err(format!("\r\x1b[2K{line}").as_bytes());
+-                    let _ = thread_printer.flush_err();
+-                }
+-
+-                thread::park_timeout(Duration::from_millis(TICK_DURATION_MS));
+-            }
+-        });
++            }))
++        } else {
++            None
++        };
+ 
+         Self {
+             stop,
+             paused,
+-            handle: Some(handle),
++            handle,
+             started_at,
+             accumulated_elapsed,
+             printer,
+@@ -143,12 +151,16 @@
+     }
+ 
+     fn clear_line(&self) {
++        if self.handle.is_none() {
++            return;
++        }
+         let _ = self.printer.write_err(b"\r\x1b[2K");
+         let _ = self.printer.flush_err();
+     }
+ 
+     fn finish(&mut self) -> Duration {
+         self.stop.store(true, Ordering::Release);
++        let had_handle = self.handle.is_some();
+         if let Some(handle) = &self.handle {
+             handle.thread().unpark();
+         }
+@@ -156,7 +168,10 @@
+             let _ = handle.join();
+         }
+         let elapsed = self.elapsed();
+-        self.clear_line();
++        if had_handle {
++            let _ = self.printer.write_err(b"\r\x1b[2K");
++            let _ = self.printer.flush_err();
++        }
+         elapsed
+     }
+ }
+@@ -164,13 +179,17 @@
+ impl<P: ConsoleWriter> Drop for ActiveSpinner<P> {
+     fn drop(&mut self) {
+         self.stop.store(true, Ordering::Release);
++        let had_handle = self.handle.is_some();
+         if let Some(handle) = &self.handle {
+             handle.thread().unpark();
+         }
+         if let Some(handle) = self.handle.take() {
+             let _ = handle.join();
+         }
+-        self.clear_line();
++        if had_handle {
++            let _ = self.printer.write_err(b"\r\x1b[2K");
++            let _ = self.printer.flush_err();
++        }
+     }
+ }
+ 

@@ -1,7 +1,17 @@
 Index: crates/forge_main/src/ui.rs
 --- crates/forge_main/src/ui.rs.orig
 +++ crates/forge_main/src/ui.rs
-@@ -2838,12 +2838,12 @@
+@@ -445,6 +445,9 @@
+ 
+     // Improve startup time by hydrating caches
+     fn hydrate_caches(&self) {
++        if cfg!(target_arch = "wasm64") {
++            return;
++        }
+         let api = self.api.clone();
+         tokio::spawn(async move { api.get_models().await });
+         let api = self.api.clone();
+@@ -2838,12 +2841,12 @@
                  ))?;
              }
              Some(content) => {
@@ -16,7 +26,7 @@ Index: crates/forge_main/src/ui.rs
                  let copied = false;
  
                  if copied {
-@@ -3237,12 +3237,12 @@
+@@ -3237,12 +3240,12 @@
          ))?;
          // Try to copy code to clipboard automatically (not available on
          // Android)
@@ -31,3 +41,13 @@ Index: crates/forge_main/src/ui.rs
          let clipboard_copied = false;
  
          if clipboard_copied {
+@@ -4422,6 +4425,9 @@
+     }
+ 
+     fn trace_user(&self) {
++        if cfg!(target_arch = "wasm64") || !forge_tracker::can_track() {
++            return;
++        }
+         let api = self.api.clone();
+         // NOTE: Spawning required so that we don't block the user while
+         // querying user info

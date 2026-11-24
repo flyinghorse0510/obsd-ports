@@ -1,0 +1,43 @@
+Index: modcargo-crates/mio-1.2.0/src/poll.rs
+--- modcargo-crates/mio-1.2.0/src/poll.rs.orig
++++ modcargo-crates/mio-1.2.0/src/poll.rs
+@@ -2,6 +2,7 @@
+     unix,
+     not(mio_unsupported_force_poll_poll),
+     not(any(
++        target_arch = "wasm64",
+         target_os = "aix",
+         target_os = "espidf",
+         target_os = "fuchsia",
+@@ -445,6 +446,7 @@
+     unix,
+     not(mio_unsupported_force_poll_poll),
+     not(any(
++        target_arch = "wasm64",
+         target_os = "aix",
+         target_os = "espidf",
+         target_os = "fuchsia",
+@@ -747,6 +749,7 @@
+     unix,
+     not(mio_unsupported_force_poll_poll),
+     not(any(
++        target_arch = "wasm64",
+         target_os = "aix",
+         target_os = "espidf",
+         target_os = "haiku",
+@@ -769,6 +772,7 @@
+     unix,
+     not(mio_unsupported_force_poll_poll),
+     not(any(
++        target_arch = "wasm64",
+         target_os = "aix",
+         target_os = "espidf",
+         target_os = "haiku",
+@@ -792,6 +796,7 @@
+         unix,
+         not(mio_unsupported_force_poll_poll),
+         not(any(
++            target_arch = "wasm64",
+             target_os = "aix",
+             target_os = "espidf",
+             target_os = "hermit",

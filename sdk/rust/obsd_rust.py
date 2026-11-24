@@ -19,7 +19,11 @@ Implements:
   4. `obsd-rust-ld`: Expands `@rspfile` linker arguments, translates `wasm-lld`
      flags to `sdk/bin/obsd-cc -nostdlib`, strips DWARF debug sections (`--strip-debug`)
      while preserving WebAssembly `linking` symbol tables for `wasm_object_tool.py`,
-     drops `-lcompiler_rt`/`-lexecinfo`/`-lunwind`, and links `unwind_stub.o`.
+     promotes read-only relocatable segments (`.data.rel.ro` -> `.rodata.rel.ro`,
+     `.data.rel.ro.*` -> `.rodata.rel.ro.*`) so `wasm_object_tool.py window-guest`
+     keeps Rust trait vtables and `const` pointer tables out of per-process mutable
+     `obsd_guest_data`, drops `-lcompiler_rt`/`-lexecinfo`/`-lunwind`, and links
+     `unwind_stub.o`.
   5. `obsd-cargo`: Extracts `.cache/distfiles/cargo/<crate>-<ver>.tar.gz` into
      `$WRKBUILD/modcargo-crates/<crate>-<ver>` with `.cargo-checksum.json`, writes
      `$WRKBUILD/.cargo-home/config.toml` vendoring `[source.crates-io]` + any
@@ -678,6 +682,113 @@ def expand_rsp_args(argv: Sequence[str]) -> List[str]:
     return out
 
 
+def _read_uleb(buf: bytes, pos: int) -> Tuple[int, int]:
+    res = 0
+    shift = 0
+    while True:
+        b = buf[pos]
+        pos += 1
+        res |= (b & 0x7F) << shift
+        if (b & 0x80) == 0:
+            return res, pos
+        shift += 7
+
+
+def _encode_uleb(val: int) -> bytes:
+    out = bytearray()
+    while True:
+        b = val & 0x7F
+        val >>= 7
+        if val != 0:
+            b |= 0x80
+        out.append(b)
+        if val == 0:
+            return bytes(out)
+
+
+def _encode_wasm_str(s: str) -> bytes:
+    raw = s.encode("utf-8")
+    return _encode_uleb(len(raw)) + raw
+
+
+def rewrite_wasm_relro_segments(obj_path: pathlib.Path) -> int:
+    """
+    Promote ELF/WASM RELRO segment names (`.data.rel.ro` -> `.rodata.rel.ro` and
+    `.data.rel.ro.*` -> `.rodata.rel.ro.*`) inside WASM `linking` v2 `WASM_SEGMENT_INFO`
+    so `wasm_object_tool.py window-guest` (`nm.startswith(".data.")`) leaves immutable
+    Rust trait vtables and `const` pointer tables in shared read-only `.rodata` instead
+    of sweeping them into per-process mutable `obsd_guest_data`.
+    """
+    if not obj_path.is_file():
+        return 0
+    data = obj_path.read_bytes()
+    if len(data) < 8 or data[:8] != b"\x00asm\x01\x00\x00\x00":
+        return 0
+
+    out = bytearray(data[:8])
+    pos = 8
+    rewritten = 0
+
+    while pos < len(data):
+        sec_id = data[pos]
+        sec_len, body_pos = _read_uleb(data, pos + 1)
+        sec_end = body_pos + sec_len
+        if sec_id == 0:
+            nlen, npos = _read_uleb(data, body_pos)
+            sec_name = data[npos : npos + nlen].decode("utf-8", "replace")
+            if sec_name == "linking":
+                ver, p = _read_uleb(data, npos + nlen)
+                if ver == 2:
+                    new_subsecs: List[Tuple[int, bytes]] = []
+                    while p < sec_end:
+                        stype = data[p]
+                        slen, sp = _read_uleb(data, p + 1)
+                        spayload = data[sp : sp + slen]
+                        p = sp + slen
+                        if stype == 5:  # WASM_SEGMENT_INFO
+                            cnt, qp = _read_uleb(spayload, 0)
+                            seg_buf = bytearray(_encode_uleb(cnt))
+                            for _ in range(cnt):
+                                sl2, qp = _read_uleb(spayload, qp)
+                                nm = spayload[qp : qp + sl2].decode("utf-8")
+                                qp += sl2
+                                align, qp = _read_uleb(spayload, qp)
+                                flags, qp = _read_uleb(spayload, qp)
+                                if nm == ".data.rel.ro":
+                                    nm = ".rodata.rel.ro"
+                                    rewritten += 1
+                                elif nm.startswith(".data.rel.ro."):
+                                    nm = ".rodata.rel.ro." + nm[len(".data.rel.ro.") :]
+                                    rewritten += 1
+                                seg_buf += _encode_wasm_str(nm)
+                                seg_buf += _encode_uleb(align)
+                                seg_buf += _encode_uleb(flags)
+                            spayload = bytes(seg_buf)
+                        new_subsecs.append((stype, spayload))
+
+                    if rewritten > 0:
+                        linking_body = bytearray(_encode_wasm_str("linking") + _encode_uleb(ver))
+                        for stype, spayload in new_subsecs:
+                            linking_body.append(stype)
+                            linking_body += _encode_uleb(len(spayload))
+                            linking_body += spayload
+                        out.append(0)
+                        out += _encode_uleb(len(linking_body))
+                        out += linking_body
+                        pos = sec_end
+                        continue
+        out += data[pos:sec_end]
+        pos = sec_end
+
+    if rewritten > 0:
+        st_mode = obj_path.stat().st_mode & 0o7777
+        tmp_p = obj_path.with_suffix(obj_path.suffix + f".{os.getpid()}.relro.tmp")
+        tmp_p.write_bytes(bytes(out))
+        tmp_p.chmod(st_mode)
+        tmp_p.replace(obj_path)
+    return rewritten
+
+
 def run_rust_ld(raw_argv: Sequence[str]) -> int:
     """
     `obsd-rust-ld`: Translate `rustc`'s `wasm-lld` invocation into `sdk/bin/obsd-cc -nostdlib`
@@ -800,7 +911,10 @@ def run_rust_ld(raw_argv: Sequence[str]) -> int:
     if output_path is not None:
         cc_args.extend(["-o", output_path])
 
-    return subprocess.run([str(obsd_cc), *cc_args]).returncode
+    rc = subprocess.run([str(obsd_cc), *cc_args]).returncode
+    if rc == 0 and output_path is not None:
+        rewrite_wasm_relro_segments(pathlib.Path(output_path))
+    return rc
 
 
 def _sha256_hex(path: pathlib.Path) -> str:

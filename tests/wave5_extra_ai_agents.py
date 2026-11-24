@@ -867,7 +867,70 @@ env = { L6 = "8.0_emulate_ios", OVER = "matrix_top" }
 
     assert lane_count == 21
     subprocess.run([sys.executable, "-I", str(REPO_ROOT / "tools/audit/audit_extra_ports.py")], check=True)
-    print("[WAVE5-MATRIX-OK] 6-layer override unit checks, audit_extra_ports.py, and all 21 3D matrix lanes verified")
+
+    # Verify `.data.rel.ro` / `.data.rel.ro.*` -> `.rodata.rel.ro` / `.rodata.rel.ro.*` promotion
+    # keeps RELRO vtables & const pointer tables out of per-process mutable `obsd_guest_data`
+    obsd_root = bp.resolve_obsd_root_arg("")
+    emcc = obsd_root / "deps/emsdk/upstream/emscripten/emcc"
+    wasm_ld = obsd_root / "deps/emsdk/upstream/bin/wasm-ld"
+    wasm_obj_tool = obsd_root / "tools/build/personalities/openbsd/backends/emulate/wasm_object_tool.py"
+    spec_mod = importlib.util.spec_from_file_location("obsd_rust", REPO_ROOT / "sdk/rust/obsd_rust.py")
+    assert spec_mod and spec_mod.loader
+    obsd_rust_mod = importlib.util.module_from_spec(spec_mod)
+    spec_mod.loader.exec_module(obsd_rust_mod)
+
+    with tempfile.TemporaryDirectory(prefix="wave5-relro-check-") as td:
+        tp = pathlib.Path(td)
+        relro_c = tp / "relro_vtable.c"
+        relro_c.write_text(
+            "int fn_a(void) { return 40; }\n"
+            "int fn_b(void) { return 2; }\n"
+            "int (*const VTABLE[2])(void) = { fn_a, fn_b };\n"
+            "__attribute__((section(\".data.rel.ro\"))) int (*const SINGLE_FN)(void) = fn_a;\n"
+            "int mutable_val = 7;\n"
+            "int main(void) { return VTABLE[0]() + VTABLE[1]() + SINGLE_FN() + mutable_val; }\n",
+            encoding="utf-8",
+        )
+        raw_o = tp / "relro.o"
+        win_o = tp / "relro_win.o"
+        linked_wasm = tp / "relro_out.wasm"
+        subprocess.run([str(emcc), "-m64", "-O2", "-fPIC", "-c", str(relro_c), "-o", str(raw_o)], check=True)
+        rew_cnt = obsd_rust_mod.rewrite_wasm_relro_segments(raw_o)
+        assert rew_cnt == 2, f"expected 2 .data.rel.ro* segments rewritten, got {rew_cnt}"
+        subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                str(wasm_obj_tool),
+                "window-guest",
+                "--window-section",
+                "obsd_guest_data",
+                "--keep-global",
+                "main",
+                "-i",
+                str(raw_o),
+                "-o",
+                str(win_o),
+            ],
+            check=True,
+        )
+        subprocess.run(
+            [
+                str(wasm_ld),
+                "-m",
+                "wasm64",
+                "--fatal-warnings",
+                "--no-entry",
+                "--export=main",
+                "--experimental-pic",
+                str(win_o),
+                "-o",
+                str(linked_wasm),
+            ],
+            check=True,
+        )
+
+    print("[WAVE5-MATRIX-OK] 6-layer override unit checks, .rodata.rel.ro promotion, audit_extra_ports.py, and all 21 3D matrix lanes verified")
 
 
 def verify_host_packaging_and_jit_free(
@@ -945,6 +1008,36 @@ def verify_host_packaging_and_jit_free(
         assert expected_entry in nm_out, f"[{ver}] {obj_path.name} missing localized entry {expected_entry}"
         bad_hits = [ln.strip() for ln in nm_out.splitlines() if FORBIDDEN_JIT_SYMBOL_RE.search(ln)]
         assert not bad_hits, f"[{ver}] JIT symbol leak in {obj_path.name}: {bad_hits[:10]}"
+
+        # Verify 0 unpromoted `.data.rel.ro*` segments in packaged WASM64 applet object
+        emulate_tools = obsd_root / "tools/build/personalities/openbsd/backends/emulate"
+        if str(emulate_tools) not in sys.path:
+            sys.path.insert(0, str(emulate_tools))
+        import wasm_object_tool as wot  # type: ignore
+
+        raw_ap = obj_path.read_bytes()
+        p_off = 8
+        while p_off < len(raw_ap):
+            s_id = raw_ap[p_off]
+            s_len, b_off = wot.read_uleb(raw_ap, p_off + 1)
+            s_end = b_off + s_len
+            if s_id == 0:
+                nl, np_off = wot.read_uleb(raw_ap, b_off)
+                if raw_ap[np_off : np_off + nl] == b"linking":
+                    _, sub_p = wot.read_uleb(raw_ap, np_off + nl)
+                    while sub_p < s_end:
+                        st_id = raw_ap[sub_p]
+                        st_len, st_b = wot.read_uleb(raw_ap, sub_p + 1)
+                        if st_id == wot.WASM_SEGMENT_INFO:
+                            leaked_relro = [
+                                sg["name"]
+                                for sg in wot.parse_segments(raw_ap[st_b : st_b + st_len])
+                                if sg["name"] == ".data.rel.ro" or sg["name"].startswith(".data.rel.ro.")
+                            ]
+                            assert not leaked_relro, f"[{ver}] {obj_path.name} leaked .data.rel.ro* segments: {leaked_relro[:5]}"
+                        sub_p = st_b + st_len
+            p_off = s_end
+
         sizes_summary.append(f"{obj_path.name}={obj_path.stat().st_size / (1024 * 1024):.1f}MiB")
 
     print(

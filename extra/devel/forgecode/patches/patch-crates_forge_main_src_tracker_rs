@@ -1,0 +1,29 @@
+Index: crates/forge_main/src/tracker.rs
+--- crates/forge_main/src/tracker.rs.orig
++++ crates/forge_main/src/tracker.rs
+@@ -5,6 +5,9 @@
+ /// Helper functions to eliminate duplication of tokio::spawn + TRACKER patterns
+ /// Generic dispatcher for any event
+ fn dispatch(event: EventKind) {
++    if !forge_tracker::can_track() {
++        return;
++    }
+     tokio::spawn(TRACKER.dispatch(event));
+ }
+ 
+@@ -44,9 +47,15 @@
+ 
+ /// For model setting
+ pub fn set_model(model: String) {
++    if !forge_tracker::can_track() {
++        return;
++    }
+     tokio::spawn(TRACKER.set_model(model));
+ }
+ 
+ pub fn login(login: String) {
++    if !forge_tracker::can_track() {
++        return;
++    }
+     tokio::spawn(TRACKER.login(login));
+ }

@@ -1,0 +1,13 @@
+Index: crates/forge_repo/src/provider/chat.rs
+--- crates/forge_repo/src/provider/chat.rs.orig
++++ crates/forge_repo/src/provider/chat.rs
+@@ -86,6 +86,9 @@
+             .cache_get::<_, Vec<Model>>(&cache_key)
+             .await
+         {
++            if cfg!(target_arch = "wasm64") {
++                return Ok(cached);
++            }
+             tracing::debug!(provider_id = %provider.id, "returning cached models; refreshing in background");
+ 
+             // Spawn a background task to refresh the disk cache. The abort

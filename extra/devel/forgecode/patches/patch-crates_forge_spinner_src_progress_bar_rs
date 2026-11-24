@@ -1,0 +1,27 @@
+Index: crates/forge_spinner/src/progress_bar.rs
+--- crates/forge_spinner/src/progress_bar.rs.orig
++++ crates/forge_spinner/src/progress_bar.rs
+@@ -10,6 +10,10 @@
+ impl ProgressBarManager {
+     /// Starts a progress bar with a known total
+     pub fn start(&mut self, total: u64, message: &str) -> Result<()> {
++        if cfg!(target_arch = "wasm64") || !std::io::IsTerminal::is_terminal(&std::io::stderr()) {
++            self.bar = Some(ProgressBar::hidden());
++            return Ok(());
++        }
+         let pb = ProgressBar::new(total);
+         pb.set_style(
+             ProgressStyle::with_template(
+@@ -44,8 +48,10 @@
+     /// Stops the progress bar and optionally prints a message
+     pub async fn stop(&mut self, message: Option<String>) -> Result<()> {
+         if let Some(bar) = self.bar.take() {
+-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+-            bar.finish_and_clear();
++            if !bar.is_hidden() {
++                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
++                bar.finish_and_clear();
++            }
+             if let Some(msg) = message {
+                 println!("{msg}");
+             }

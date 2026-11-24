@@ -1,0 +1,12 @@
+Index: crates/forge_tracker/src/lib.rs
+--- crates/forge_tracker/src/lib.rs.orig
++++ crates/forge_tracker/src/lib.rs
+@@ -6,7 +6,7 @@
+ mod event;
+ mod log;
+ mod rate_limit;
+-pub use can_track::VERSION;
++pub use can_track::{VERSION, can_track};
+ pub use dispatch::Tracker;
+ use error::Result;
+ pub use event::{Event, EventKind, ToolCallPayload};

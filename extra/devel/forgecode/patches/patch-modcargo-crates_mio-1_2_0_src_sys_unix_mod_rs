@@ -1,0 +1,19 @@
+Index: modcargo-crates/mio-1.2.0/src/sys/unix/mod.rs
+--- modcargo-crates/mio-1.2.0/src/sys/unix/mod.rs.orig
++++ modcargo-crates/mio-1.2.0/src/sys/unix/mod.rs
+@@ -26,6 +26,7 @@
+     ), path = "selector/epoll.rs")]
+     #[cfg_attr(all(
+         not(mio_unsupported_force_poll_poll),
++        not(target_arch = "wasm64"),
+         any(
+             target_os = "dragonfly",
+             target_os = "freebsd",
+@@ -40,6 +41,7 @@
+     ), path = "selector/kqueue.rs")]
+     #[cfg_attr(any(
+         mio_unsupported_force_poll_poll,
++        target_arch = "wasm64",
+         target_os = "aix",
+         target_os = "espidf",
+         target_os = "fuchsia",

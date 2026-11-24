@@ -36,3 +36,16 @@ Index: crates/forge_repo/src/database/pool.rs
          }
      }
  }
+@@ -164,8 +178,10 @@
+             builder = builder.min_idle(Some(min_idle));
+         }
+ 
+-        if let Some(idle_timeout) = config.idle_timeout {
+-            builder = builder.idle_timeout(Some(idle_timeout));
++        builder = builder.idle_timeout(config.idle_timeout);
++        #[cfg(target_arch = "wasm64")]
++        {
++            builder = builder.max_lifetime(None);
+         }
+ 
+         let pool = builder.build(manager).map_err(|e| {

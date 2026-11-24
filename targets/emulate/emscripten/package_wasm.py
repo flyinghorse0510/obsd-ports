@@ -70,6 +70,110 @@ def is_wasm_object(path: pathlib.Path) -> bool:
         return False
 
 
+def _read_uleb(buf: bytes, pos: int) -> Tuple[int, int]:
+    res = 0
+    shift = 0
+    while True:
+        b = buf[pos]
+        pos += 1
+        res |= (b & 0x7F) << shift
+        if (b & 0x80) == 0:
+            return res, pos
+        shift += 7
+
+
+def _encode_uleb(val: int) -> bytes:
+    out = bytearray()
+    while True:
+        b = val & 0x7F
+        val >>= 7
+        if val != 0:
+            b |= 0x80
+        out.append(b)
+        if val == 0:
+            return bytes(out)
+
+
+def _encode_wasm_str(s: str) -> bytes:
+    raw = s.encode("utf-8")
+    return _encode_uleb(len(raw)) + raw
+
+
+def rewrite_wasm_relro_segments(obj_path: pathlib.Path) -> int:
+    """
+    Promote ELF/WASM RELRO segment names (`.data.rel.ro` -> `.rodata.rel.ro` and
+    `.data.rel.ro.*` -> `.rodata.rel.ro.*`) inside WASM `linking` v2 `WASM_SEGMENT_INFO`
+    before `wasm_object_tool.py` runs, ensuring immutable vtables and const pointer
+    tables stay in shared read-only `.rodata` instead of mutable `obsd_guest_data`.
+    """
+    data = obj_path.read_bytes()
+    if len(data) < 8 or data[:8] != b"\x00asm\x01\x00\x00\x00":
+        return 0
+
+    out = bytearray(data[:8])
+    pos = 8
+    rewritten = 0
+
+    while pos < len(data):
+        sec_id = data[pos]
+        sec_len, body_pos = _read_uleb(data, pos + 1)
+        sec_end = body_pos + sec_len
+        if sec_id == 0:
+            nlen, npos = _read_uleb(data, body_pos)
+            sec_name = data[npos : npos + nlen].decode("utf-8", "replace")
+            if sec_name == "linking":
+                ver, p = _read_uleb(data, npos + nlen)
+                if ver == 2:
+                    new_subsecs: List[Tuple[int, bytes]] = []
+                    while p < sec_end:
+                        stype = data[p]
+                        slen, sp = _read_uleb(data, p + 1)
+                        spayload = data[sp : sp + slen]
+                        p = sp + slen
+                        if stype == 5:  # WASM_SEGMENT_INFO
+                            cnt, qp = _read_uleb(spayload, 0)
+                            seg_buf = bytearray(_encode_uleb(cnt))
+                            for _ in range(cnt):
+                                sl2, qp = _read_uleb(spayload, qp)
+                                nm = spayload[qp : qp + sl2].decode("utf-8")
+                                qp += sl2
+                                align, qp = _read_uleb(spayload, qp)
+                                flags, qp = _read_uleb(spayload, qp)
+                                if nm == ".data.rel.ro":
+                                    nm = ".rodata.rel.ro"
+                                    rewritten += 1
+                                elif nm.startswith(".data.rel.ro."):
+                                    nm = ".rodata.rel.ro." + nm[len(".data.rel.ro.") :]
+                                    rewritten += 1
+                                seg_buf += _encode_wasm_str(nm)
+                                seg_buf += _encode_uleb(align)
+                                seg_buf += _encode_uleb(flags)
+                            spayload = bytes(seg_buf)
+                        new_subsecs.append((stype, spayload))
+
+                    if rewritten > 0:
+                        linking_body = bytearray(_encode_wasm_str("linking") + _encode_uleb(ver))
+                        for stype, spayload in new_subsecs:
+                            linking_body.append(stype)
+                            linking_body += _encode_uleb(len(spayload))
+                            linking_body += spayload
+                        out.append(0)
+                        out += _encode_uleb(len(linking_body))
+                        out += linking_body
+                        pos = sec_end
+                        continue
+        out += data[pos:sec_end]
+        pos = sec_end
+
+    if rewritten > 0:
+        st_mode = obj_path.stat().st_mode & 0o7777
+        tmp_p = obj_path.with_suffix(obj_path.suffix + f".{os.getpid()}.relro.tmp")
+        tmp_p.write_bytes(bytes(out))
+        tmp_p.chmod(st_mode)
+        tmp_p.replace(obj_path)
+    return rewritten
+
+
 def resolve_staged_symlink(stage_dir: pathlib.Path, link_path: pathlib.Path, max_hops: int = 16) -> Optional[pathlib.Path]:
     """Resolve a staged path or symlink (supporting both relative and guest-absolute targets)."""
     cur = link_path
@@ -189,6 +293,7 @@ def localize_port_applets(
             else:
                 shutil.copy2(bin_path, raw_obj)
 
+            rewrite_wasm_relro_segments(raw_obj)
             src_entry = detect_wasm_main_symbol(llvm_nm, raw_obj, app.get("entry", "auto"))
             loc_obj = applets_dir / f"{sym}.o"
             subprocess.run(

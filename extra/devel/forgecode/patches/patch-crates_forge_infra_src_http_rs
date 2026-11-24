@@ -1,0 +1,31 @@
+Index: crates/forge_infra/src/http.rs
+--- crates/forge_infra/src/http.rs.orig
++++ crates/forge_infra/src/http.rs
+@@ -68,6 +68,14 @@
+             .http2_keep_alive_timeout(Duration::from_secs(http.keep_alive_timeout_secs))
+             .http2_keep_alive_while_idle(http.keep_alive_while_idle);
+ 
++        #[cfg(target_arch = "wasm64")]
++        {
++            client = client
++                .pool_max_idle_per_host(0)
++                .pool_idle_timeout(Duration::ZERO)
++                .http1_only();
++        }
++
+         // Add root certificates from config
+         if let Some(ref cert_paths) = http.root_cert_paths {
+             for cert_path in cert_paths {
+@@ -202,6 +210,12 @@
+             "HTTP-Referer",
+             HeaderValue::from_static("https://forgecode.dev"),
+         );
++        #[cfg(target_arch = "wasm64")]
++        headers.insert(
++            reqwest::header::CONNECTION,
++            HeaderValue::from_static("close"),
++        );
++        #[cfg(not(target_arch = "wasm64"))]
+         headers.insert(
+             reqwest::header::CONNECTION,
+             HeaderValue::from_static("keep-alive"),

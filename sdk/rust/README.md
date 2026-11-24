@@ -6,7 +6,7 @@ Provides `wasm64-unknown-openbsd.json`, 3D `(OPENBSD_VERSION x COMPAT_BACKEND x 
 
 | `COMPAT_BACKEND` | `COMPAT_PAL` | Rust Target Spec / Triple | Notes |
 | :--- | :--- | :--- | :--- |
-| `emulate` | `emscripten` | `sdk/rust/wasm64-unknown-openbsd.json` | Active WASM64 OpenBSD Unix PAL (`pthread` TLS in `obsd_guest_data`, `panic=abort`, `+atomics,+simd128`). |
+| `emulate` | `emscripten` | `sdk/rust/wasm64-unknown-openbsd.json` | Active WASM64 OpenBSD Unix PAL (`pthread` TLS in `obsd_guest_data`, `.data.rel.ro*` promoted to `.rodata.rel.ro*`, `panic=abort`, `+atomics,+simd128`). |
 | `emulate` | `wasi` | `wasm32-wasip2` (`wasm64-wasi` seam) | WASI preview2 headless emulate seam. |
 | `emulate` | `darwin` | `aarch64-apple-darwin` | macOS `arm64` Mach-O relocatable applet seam. |
 | `emulate` | `ios` | `aarch64-apple-ios` | iOS/iPadOS `arm64` strict W^X zero-JIT Mach-O applet seam. |

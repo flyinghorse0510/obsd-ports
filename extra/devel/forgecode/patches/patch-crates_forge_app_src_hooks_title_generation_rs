@@ -1,0 +1,12 @@
+Index: crates/forge_app/src/hooks/title_generation.rs
+--- crates/forge_app/src/hooks/title_generation.rs.orig
++++ crates/forge_app/src/hooks/title_generation.rs
+@@ -38,7 +38,7 @@
+         event: &EventData<StartPayload>,
+         conversation: &mut Conversation,
+     ) -> anyhow::Result<()> {
+-        if conversation.title.is_some() {
++        if cfg!(target_arch = "wasm64") || conversation.title.is_some() {
+             return Ok(());
+         }
+ 

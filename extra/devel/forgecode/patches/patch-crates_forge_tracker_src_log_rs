@@ -1,0 +1,35 @@
+Index: crates/forge_tracker/src/log.rs
+--- crates/forge_tracker/src/log.rs.orig
++++ crates/forge_tracker/src/log.rs
+@@ -11,6 +11,13 @@
+ pub fn init_tracing(log_path: PathBuf, tracker: Tracker) -> anyhow::Result<Guard> {
+     debug!(path = %log_path.display(), "Initializing logging system in JSON format");
+ 
++    if cfg!(target_arch = "wasm64")
++        && std::env::var_os("FORGE_LOG").is_none()
++        && !can_track()
++    {
++        return Ok(Guard(None));
++    }
++
+     // If tracking is enabled, use PostHog for logging; otherwise, use a rolling
+     // file appender.
+     let (writer, guard, level) = prepare_writer(log_path, tracker);
+@@ -33,7 +40,7 @@
+         .with(fmt_layer)
+         .init();
+ 
+-    Ok(Guard(guard))
++    Ok(Guard(Some(guard)))
+ }
+ 
+ fn prepare_writer(
+@@ -60,7 +67,7 @@
+     (non_blocking, guard, env)
+ }
+ 
+-pub struct Guard(#[allow(dead_code)] WorkerGuard);
++pub struct Guard(#[allow(dead_code)] Option<WorkerGuard>);
+ 
+ struct PostHogWriter {
+     tracker: Tracker,
