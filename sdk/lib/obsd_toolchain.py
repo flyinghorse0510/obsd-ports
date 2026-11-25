@@ -93,9 +93,6 @@ WASM_BOUNDARY_IMPORTS: Set[str] = {
     "__stack_pointer",
     "__indirect_function_table",
     "__linear_memory",
-    "__tls_base",
-    "__tls_size",
-    "__tls_align",
     "emscripten_return_address",
 }
 
@@ -752,7 +749,7 @@ def ensure_cxx_runtime(ctx: EmscriptenToolchain) -> Tuple[pathlib.Path, pathlib.
         die(f"missing OpenBSD {ctx.openbsd_version} include root: {ctx.include_root}")
 
     sig_src = (
-        f"cxx-rt-v2:{ctx.openbsd_version}:{ctx.emcxx.stat().st_mtime_ns}:"
+        f"cxx-rt-v5:{ctx.openbsd_version}:{ctx.emcxx.stat().st_mtime_ns}:"
         f"{ctx.base_archive.stat().st_mtime_ns if ctx.base_archive.is_file() else 0}:"
         f"{LIBCPP_CONFIG_SITE_TEXT}:{OBSD_CXX_SUPPORT_C}"
     )
@@ -782,6 +779,7 @@ def ensure_cxx_runtime(ctx: EmscriptenToolchain) -> Tuple[pathlib.Path, pathlib.
             "-O2",
             "-fno-common",
             "-fno-builtin",
+            "-femulated-tls",
             "-fwasm-exceptions",
             "-sSUPPORT_LONGJMP=0",
             "-fsanitize-coverage=func,trace-pc",
@@ -965,9 +963,16 @@ def ensure_cxx_runtime(ctx: EmscriptenToolchain) -> Tuple[pathlib.Path, pathlib.
                     )
                 )
 
+            emulate_tools = ctx.obsd_root / "tools/build/personalities/openbsd/backends/emulate"
+            if str(emulate_tools) not in sys.path:
+                sys.path.insert(0, str(emulate_tools))
+            import wasm_object_tool as wot  # type: ignore
+
             def _compile_one(item: Tuple[str, List[str]]) -> Tuple[str, int, str]:
                 lbl, cmd_vec = item
                 p = subprocess.run(cmd_vec, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                if p.returncode == 0:
+                    wot.lower_emutls_file(pathlib.Path(cmd_vec[-1]))
                 return lbl, p.returncode, p.stderr
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count() or 8) as pool:
@@ -1009,6 +1014,7 @@ def build_guest_compile_flags(
         "-O2",
         "-fno-common",
         "-fno-builtin",
+        "-femulated-tls",
         "-sSUPPORT_LONGJMP=0",
         "-Wno-invalid-noreturn",
         "-Wno-unsupported-visibility",
@@ -1340,6 +1346,7 @@ def wrap_wasm_init_funcs(ctx: EmscriptenToolchain, obj_path: pathlib.Path, tmp_d
             "-O2",
             "-fno-common",
             "-fno-builtin",
+            "-femulated-tls",
             "-sSUPPORT_LONGJMP=0",
             "-fsanitize-coverage=trace-pc,no-prune",
             "-nostdinc",
@@ -1587,13 +1594,28 @@ def run_emscripten_cc_driver(argv: List[str], is_cxx: bool) -> int:
         compile_user_args.append(a)
         i += 1
 
+    emulate_tools = ctx.obsd_root / "tools/build/personalities/openbsd/backends/emulate"
+    if str(emulate_tools) not in sys.path:
+        sys.path.insert(0, str(emulate_tools))
+    import wasm_object_tool as wot  # type: ignore
+
     if mode_preprocess or mode_compile_only:
         cmd = [compiler_bin, *prefix_cf, *compile_user_args, *dep_args, *suffix_cf]
+        is_asm_out = "-S" in compile_user_args or "-S" in argv
         if mode_compile_only and "-c" not in compile_user_args and "-S" not in compile_user_args:
-            cmd.append("-S" if "-S" in argv else "-c")
+            cmd.append("-S" if is_asm_out else "-c")
         if output_path is not None:
             cmd.extend(["-o", output_path])
-        return subprocess.run(cmd).returncode
+        rc = subprocess.run(cmd).returncode
+        if rc == 0 and mode_compile_only and not mode_preprocess and not is_asm_out:
+            if output_path is not None:
+                cand_o = pathlib.Path(output_path)
+            else:
+                srcs = [v for k, v in link_items if k == "src" and v != "-"]
+                cand_o = pathlib.Path(os.path.splitext(os.path.basename(srcs[0]))[0] + ".o") if len(srcs) == 1 else None
+            if cand_o is not None and cand_o.is_file():
+                wot.lower_emutls_file(cand_o)
+        return rc
 
     out_file = pathlib.Path(output_path or "a.out")
     compile_only_flags = [x for x in compile_user_args if not is_source_file(x) and x != "-"]
@@ -1622,6 +1644,8 @@ def run_emscripten_cc_driver(argv: List[str], is_cxx: bool) -> int:
                 rc = subprocess.run(c_cmd).returncode
                 if rc != 0:
                     return rc
+                if tmp_obj.is_file():
+                    wot.lower_emutls_file(tmp_obj)
                 ld_inputs.append(str(tmp_obj))
             elif kind == "obj":
                 ld_inputs.append(val)

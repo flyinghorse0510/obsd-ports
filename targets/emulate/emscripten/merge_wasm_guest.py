@@ -146,7 +146,8 @@ ports_runner_thread(void *arg)
 	req.struct_size = (uint32_t)sizeof(req);
 	req.argc = 2;
 	req.flags = OBSD_EMULATE_EMBED_OWN_HOST_SIGNALS |
-	    OBSD_EMULATE_EMBED_PREEMPT_STALLED;
+	    OBSD_EMULATE_EMBED_PREEMPT_STALLED |
+	    OBSD_EMULATE_EMBED_BANKED_GUEST;
 	req.image = "/bin/ksh";
 	req.argv = argv_vec;
 	req.envp = env_vec;
@@ -455,6 +456,7 @@ def merge_guest_objects(
             "-pthread",
             "-O2",
             "-fno-common",
+            "-femulated-tls",
             "-fno-stack-protector",
             "-sSUPPORT_LONGJMP=0",
             "-U__APPLE__",
@@ -601,9 +603,15 @@ def build_and_cache_test_runtime(
     base_ar = wasm_build_dir / f"libobsdc-wasm-{openbsd_version}.a"
     port_rows = parse_ports_applets_tsv(ports_lane_dir)
 
+    bank_cpp = obsd_root / "tools/build/wasm-guest-bank/wasm_bank_guest.cpp"
+    wot_py = obsd_root / "tools/build/personalities/openbsd/backends/emulate/wasm_object_tool.py"
     h = hashlib.sha256()
-    h.update(b"pthread_pool=64:init_mem=536870912")
+    h.update(b"pthread_pool=64:init_mem=536870912:banked_v1")
     h.update(f"{base_ar.stat().st_mtime_ns}:{host_ar.stat().st_mtime_ns}".encode())
+    if bank_cpp.is_file():
+        h.update(hashlib.sha256(bank_cpp.read_bytes()).digest())
+    if wot_py.is_file():
+        h.update(hashlib.sha256(wot_py.read_bytes()).digest())
     h.update(",".join(sorted(MINIMAL_BASE_SYMS)).encode())
     h.update(HOST_RUNNER_C.encode())
     for sym, gp, ent, obj_p in port_rows:
@@ -718,7 +726,15 @@ const enc = new TextEncoder();
 const dec = new TextDecoder('utf-8', { fatal: false });
 
 const createRuntime = (await import(pathToFileURL(path.resolve(runtimePath)).href)).default;
-const Module = await createRuntime();
+const Module = await createRuntime({
+  preRun: [
+    (m) => {
+      if (process.env.LIBOBSDCOMPAT_EMULATE_NCPU && m.ENV) {
+        m.ENV.LIBOBSDCOMPAT_EMULATE_NCPU = process.env.LIBOBSDCOMPAT_EMULATE_NCPU;
+      }
+    },
+  ],
+});
 const { FS } = Module;
 
 function mkdirp(p, mode = 0o755) {
@@ -1242,6 +1258,12 @@ if (cfg.enableSvnp) {
       }
     }
   }, 2).unref();
+} else {
+  const lo = Module._ports_svnp_shm_lo() >>> 0;
+  const hi = Module._ports_svnp_shm_hi() >>> 0;
+  const shmOff = hi * 0x100000000 + lo;
+  const i32 = new Int32Array(Module.wasmMemory.buffer);
+  Atomics.store(i32, (shmOff + 8) >> 2, -1); // WS_STATE = offline
 }
 
 const rc = Module._ports_start(cfg.enableSvnp ? 1 : 0);

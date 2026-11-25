@@ -1416,14 +1416,33 @@ def _semantic_identity_bytes(ident_path: pathlib.Path) -> bytes:
     return "\n".join(sorted(keep)).encode("utf-8")
 
 
-def toolchain_digest(obsd_root: pathlib.Path, openbsd_version: str, backend: str, pal: str, sdk: str = "") -> str:
+def toolchain_digest(
+    obsd_root: pathlib.Path,
+    openbsd_version: str,
+    backend: str,
+    pal: str,
+    sdk: str = "",
+    style: str = "",
+) -> str:
     """Content digest of everything a port compiles against besides its own
-    sources: sdk/ (wrappers, flags, autoconf/cmake), the libobsdcompat
+    sources: sdk/ (wrappers, flags, autoconf/cmake or rust), the libobsdcompat
     `include-root-<v>` headers, and the lane identity/toolchain. Computed once per run."""
-    key = (str(obsd_root), openbsd_version, backend, pal, sdk)
+    eff_style = "cargo" if style == "cargo" else ""
+    key = (str(obsd_root), openbsd_version, backend, pal, sdk, eff_style)
     if key not in _TOOLCHAIN_DIGESTS:
         h = hashlib.sha256()
-        _digest_tree(h, REPO_ROOT / "sdk", "sdk")
+        if eff_style == "cargo":
+            _digest_tree(h, REPO_ROOT / "sdk/rust", "sdk-rust")
+            for rel_f in (
+                "sdk/bin/obsd-cargo",
+                "sdk/bin/obsd-rust-ld",
+                "sdk/bin/obsd-install",
+                "sdk/lib/obsd-python.sh",
+            ):
+                fp = REPO_ROOT / rel_f
+                h.update(rel_f.encode() + b"=" + (sha256_file(fp).encode() if fp.is_file() else b"<missing>"))
+        else:
+            _digest_tree(h, REPO_ROOT / "sdk", "sdk")
         if pal == "emscripten":
             wasm_dir = obsd_root / f"build/wasm-{openbsd_version}"
             _digest_tree(h, wasm_dir / f"include-root-{openbsd_version}", "include-root")
@@ -1698,7 +1717,8 @@ def build_single_port(
         sig_h.update(df_ent["sha256"].encode())
     # Header/SDK dependencies: a changed libobsdcompat include-root, SDK wrapper
     # or emsdk release must rebuild ports (no stale objects after a lib update).
-    sig_h.update(toolchain_digest(obsd_root, openbsd_version, backend, pal, sdk).encode())
+    port_style = str(recipe.get("build_style", "gnu")).strip()
+    sig_h.update(toolchain_digest(obsd_root, openbsd_version, backend, pal, sdk, style=port_style).encode())
     build_sig = sig_h.hexdigest()
 
     if not force and stamp_file.is_file():

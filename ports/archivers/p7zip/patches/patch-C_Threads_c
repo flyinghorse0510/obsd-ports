@@ -1,0 +1,51 @@
+Avoid undefined-behavior function pointer cast from `unsigned (*)(void *)` to
+`void *(*)(void *)` in `pthread_create()`. Under multi-core WASM64 (`hw.ncpu > 1`),
+`7za` spawns worker threads via `Thread_Create`, and WebAssembly `call_indirect`
+traps on `i32 (i64)` vs `i64 (i64)` signature mismatch inside `_rthread_start`.
+
+--- C/Threads.c.orig
++++ C/Threads.c
+@@ -185,10 +185,23 @@
+ 
+ #else /* !ENV_BEOS */
+ 
++typedef struct {
++	THREAD_FUNC_RET_TYPE (THREAD_FUNC_CALL_TYPE *fn)(void *);
++	LPVOID param;
++} ObsdP7zipThreadCtx;
++
++static void *obsd_p7zip_thread_trampoline(void *arg)
++{
++	ObsdP7zipThreadCtx ctx = *(ObsdP7zipThreadCtx *)arg;
++	free(arg);
++	return (void *)(size_t)ctx.fn(ctx.param);
++}
++
+ WRes Thread_Create(CThread *thread, THREAD_FUNC_RET_TYPE (THREAD_FUNC_CALL_TYPE *startAddress)(void *), LPVOID parameter)
+ { 
+ 	pthread_attr_t attr;
+ 	int ret;
++	ObsdP7zipThreadCtx *ctx;
+ 
+ 	thread->_created = 0;
+ 
+@@ -198,9 +211,18 @@
+ 	ret = pthread_attr_setdetachstate(&attr,PTHREAD_CREATE_JOINABLE);
+ 	if (ret) return ret;
+ 
+-	ret = pthread_create(&thread->_tid, &attr, (void * (*)(void *))startAddress, parameter);
++	ctx = (ObsdP7zipThreadCtx *)malloc(sizeof(*ctx));
++	if (!ctx) {
++		pthread_attr_destroy(&attr);
++		return ENOMEM;
++	}
++	ctx->fn = startAddress;
++	ctx->param = parameter;
++
++	ret = pthread_create(&thread->_tid, &attr, obsd_p7zip_thread_trampoline, ctx);
+ 
+ 	/* ret2 = */ pthread_attr_destroy(&attr);
++	if (ret) free(ctx);
+ 
+ 	if (ret) return ret;
+ 	

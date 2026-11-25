@@ -34,6 +34,7 @@ paths = ["/usr/local/bin/7zr"]
 [versions."8.0"]
 vendor_port = "archivers/7zip"
 pkgname = "7zip-26.03"
+skip_patches = ["patch-C_Threads_c"]
 extract_only = ["7z2603-src.tar.xz"]
 fix_crlf_files = [
     "CPP/7zip/7zip_gcc.mak",
