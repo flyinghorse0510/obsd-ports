@@ -1,4 +1,5 @@
 port = "graphics/stable-diffusion.cpp"
+only_for_pals = ["emscripten"]
 only_versions = ["7.9", "8.0"]
 build_style = "cmake"
 separate_build = true

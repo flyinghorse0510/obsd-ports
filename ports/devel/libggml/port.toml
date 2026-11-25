@@ -1,4 +1,5 @@
 port = "devel/libggml"
+only_for_pals = ["emscripten"]
 build_style = "cmake"
 separate_build = true
 

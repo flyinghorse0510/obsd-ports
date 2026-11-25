@@ -31,6 +31,9 @@ import sys
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT / "tools/config"))
+import obsd_versions  # noqa: E402  (release axis from config/versions/index.tsv)
+import obsd_env  # noqa: E402  (EMSDK_PYTHON pinning)
 
 MINIMAL_BASE_SYMS = {
     "ksh",
@@ -1328,16 +1331,25 @@ def cmd_run_guest(args: argparse.Namespace) -> int:
             staged_files.append(("/etc/ssl/cert.pem", str(cert_cand), 0o444))
             break
 
-    # Stage terminfo entries for curses/nano tests
+    # Stage terminfo entries for curses/nano tests (Linux/BSD: x/xterm; macOS: 78/xterm)
     for rel_ti in ("d/dumb", "x/xterm", "x/xterm-256color", "v/vt100"):
-        for base_ti in ("/usr/share/terminfo", "/lib/terminfo"):
-            cand = pathlib.Path(base_ti) / rel_ti
-            if cand.is_file():
-                staged_files.append((f"/usr/share/terminfo/{rel_ti}", str(cand), 0o444))
+        ti_name = rel_ti.split("/", 1)[1]
+        hex_rel = f"{ord(ti_name[0]):02x}/{ti_name}"
+        found_ti = False
+        for base_ti in ("/usr/share/terminfo", "/lib/terminfo", "/opt/homebrew/share/terminfo"):
+            for sub_rel in (rel_ti, hex_rel):
+                cand = pathlib.Path(base_ti) / sub_rel
+                if cand.is_file():
+                    staged_files.append((f"/usr/share/terminfo/{rel_ti}", str(cand), 0o444))
+                    found_ti = True
+                    break
+            if found_ti:
                 break
 
     # Stage OpenBSD UTF-8 LC_CTYPE when available so widechar curses TUIs enable UTF-8 cleanly
     for lc_cand in (
+        REPO_ROOT.parent.parent / f"build/wasm/.work-{ver}/rootfs/LC_CTYPE",
+        REPO_ROOT.parent.parent / "runtime/overlay/usr/share/locale/UTF-8/LC_CTYPE",
         obsd_root.parent.parent / f"build/wasm/.work-{ver}/rootfs/LC_CTYPE",
         obsd_root.parent.parent / "runtime/overlay/usr/share/locale/UTF-8/LC_CTYPE",
         obsd_root / "vendor/openbsd/versions" / ver / "share/locale/UTF-8/LC_CTYPE",
@@ -1391,7 +1403,7 @@ def main() -> int:
 
     p_r = sub.add_parser("run-guest")
     p_r.add_argument("--libobsdcompat-root", required=True)
-    p_r.add_argument("--openbsd-version", default="8.0")
+    p_r.add_argument("--openbsd-version", default=obsd_versions.default_version())
     p_r.add_argument("--ports-lane-dir", required=True)
     p_r.add_argument("--cmd", default="uname -a")
     p_r.add_argument("--script-file", default="")
@@ -1399,6 +1411,7 @@ def main() -> int:
     p_r.add_argument("--timeout-ms", type=int, default=120000)
 
     args = ap.parse_args()
+    obsd_env.ensure_emsdk_python(args.libobsdcompat_root)
     if args.mode == "merge-guest":
         merge_guest_objects(
             obsd_root=pathlib.Path(args.libobsdcompat_root).resolve(),

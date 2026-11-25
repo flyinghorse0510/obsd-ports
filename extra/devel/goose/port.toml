@@ -1,7 +1,7 @@
 port = "devel/goose"
 only_for_versions = ["7.8", "7.9", "8.0"]
 only_for_backends = ["emulate", "translate"]
-only_for_pals = ["emscripten", "wasi", "darwin", "ios", "linux"]
+only_for_pals = ["emscripten"]
 build_style = "cargo"
 cargo_packages = ["goose-cli"]
 cargo_bins = ["goose"]
@@ -39,11 +39,8 @@ applets = []
 [pals.emscripten]
 env = { TOKIO_WORKER_THREADS = "4", RAYON_NUM_THREADS = "2" }
 
-[pals.ios]
-env = { OBSD_STRICT_WX_ZERO_JIT = "1" }
-
 [pals.darwin]
-env = {}
+env = { OBSD_STRICT_WX_ZERO_JIT = "1" }
 
 [pals.wasi]
 env = { TOKIO_WORKER_THREADS = "2", RAYON_NUM_THREADS = "1" }
@@ -54,5 +51,5 @@ env = {}
 [targets."emulate/emscripten"]
 env = { OBSD_WASM64_PTHREAD_BUDGET = "4" }
 
-[targets."emulate/ios"]
+[targets."emulate/darwin"]
 env = { OBSD_IOS_APPLET_CLOSURE = "1" }

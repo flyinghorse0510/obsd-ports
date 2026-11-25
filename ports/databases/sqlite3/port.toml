@@ -6,6 +6,7 @@ cflags = [
     "-DSQLITE_ENABLE_UNLOCK_NOTIFY",
     "-DSQLITE_ENABLE_DBSTAT_VTAB",
     "-DSQLITE_ENABLE_COLUMN_METADATA",
+    "-DSQLITE_OMIT_LOAD_EXTENSION=1",
 ]
 
 # Fix upstream SQLite LP64/WASM64 variadic UB in shell.c / src/shell.c.in where
@@ -25,6 +26,7 @@ configure_args = [
     "--enable-static",
     "--soname=none",
     "--enable-all",
+    "--disable-load-extension",
     "--with-readline-ldflags=-ledit -lcurses",
 ]
 
@@ -47,6 +49,7 @@ configure_args = [
     "--soname=none",
     "--disable-tcl",
     "--enable-all",
+    "--disable-load-extension",
     "--with-readline-ldflags=-ledit -lcurses",
 ]
 
@@ -60,5 +63,6 @@ configure_args = [
     "--soname=none",
     "--disable-tcl",
     "--enable-all",
+    "--disable-load-extension",
     "--with-readline-ldflags=-ledit -lcurses",
 ]

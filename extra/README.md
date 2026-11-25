@@ -14,7 +14,7 @@
 
 ## Current JIT-Free `extra/` Ports (`config/extra/index.tsv`)
 
-All `extra/` ports enforce strict W^X / WASM64 / iOS zero-JIT compliance (`0` `wasmtime`, `cranelift`, `v8`, `deno_core`, `luajit`, or `pcre2_jit` symbols) and build cleanly across OpenBSD `7.8`, `7.9`, and `8.0` and all 7 `(COMPAT_BACKEND x COMPAT_PAL)` cells (`21` lanes):
+All `extra/` ports enforce strict W^X / WASM64 / iOS zero-JIT compliance (`0` `wasmtime`, `cranelift`, `v8`, `deno_core`, `luajit`, or `pcre2_jit` symbols), keep valid 5-cell 3D matrix sections (`emulate/{emscripten,wasi,darwin}` + `translate/{darwin,linux}`), and build cleanly across OpenBSD `7.8`, `7.9`, and `8.0` on `emulate/emscripten`:
 
 | Port | Package | Upstream | Exported Binaries & Highlights |
 | :--- | :--- | :--- | :--- |

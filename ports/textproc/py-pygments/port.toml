@@ -1,4 +1,5 @@
 port = "textproc/py-pygments"
+only_for_pals = ["emscripten"]
 depends = ["lang/python/3"]
 build_style = "script"
 

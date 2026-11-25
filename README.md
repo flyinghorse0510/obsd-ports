@@ -2,19 +2,19 @@
 
 `obsd-ports` cross-compiles and packages authentic OpenBSD release ports (`7.8`, `7.9`, `8.0`, and future releases) alongside first-class self-contained `extra/` ports against [`libobsdcompat`](../libobsdcompat) without modifying upstream OpenBSD vendor metadata.
 
-## Multi-Axis Architecture (`3 Releases x 7 Backend/PAL Cells = 21 Lanes`)
+## Multi-Axis Architecture (`3 Releases x 5 Backend/PAL Cells = 15 Matrix Cells`)
 
 Every build is parameterized cleanly across three orthogonal axes:
 
-1. **OpenBSD Release (`OPENBSD_VERSION`)**: `8.0` (default), `7.9`, `7.8` — declared in [`config/versions/index.tsv`](config/versions/index.tsv), backed by SHA256-verified official OpenBSD `ports.tar.gz` catalogs (`config/versions/<ver>-catalog.tsv`, ~10,400–10,750+ ports per release), immutable port subtrees under `vendor/openbsd/versions/<ver>/ports/`, and self-contained W^X JIT-free extra ports under [`extra/`](extra/) ([`config/extra/index.tsv`](config/extra/index.tsv)).
+1. **OpenBSD Release (`OPENBSD_VERSION`)**: `8.0` (default), `7.9`, `7.8` — declared in [`config/versions/index.tsv`](config/versions/index.tsv), the single source of truth for the release axis (the default is the newest `verified` row; Make, `tools/build_ports.py`, the SDK and every test resolve releases through [`tools/config/obsd_versions.py`](tools/config/obsd_versions.py), never from a hardcoded list), backed by SHA256-verified official OpenBSD `ports.tar.gz` catalogs (`config/versions/<ver>-catalog.tsv`, ~10,400–10,750+ ports per release), immutable port subtrees under `vendor/openbsd/versions/<ver>/ports/`, and self-contained W^X JIT-free extra ports under [`extra/`](extra/) ([`config/extra/index.tsv`](config/extra/index.tsv)).
 2. **Compatibility Backend (`COMPAT_BACKEND`)**: `emulate` (default, crunched multi-call relocatable applets) and `translate` (standalone boundary executables).
-3. **Platform Abstraction Layer (`COMPAT_PAL`)**: `emscripten` (active v1 WASM64 browser & Node.js guest), with 7-cell 3D matrix seams across `emulate/{emscripten,wasi,darwin,ios}` and `translate/{darwin,ios,linux}` (`3 x 7 = 21` lanes) declared in [`config/matrix/index.tsv`](config/matrix/index.tsv).
+3. **Platform Abstraction Layer (`COMPAT_PAL`)**: `emscripten` (active WASM64 browser & Node.js guest), `darwin` (active arm64 Mach-O lanes: `emulate` with `COMPAT_SDK=iphonesimulator|iphoneos` for multi-core banked iOS/iPadOS and `translate` with `COMPAT_SDK=macosx` for macOS), plus clean target seams for `wasi` and `linux` declared in [`config/matrix/index.tsv`](config/matrix/index.tsv).
 
-All build outputs isolate cleanly under `build/openbsd/<OPENBSD_VERSION>/<COMPAT_BACKEND>/<COMPAT_PAL>/`, with `SECTION=all|ports|extra` selecting both or individual port trees.
+All build outputs isolate cleanly under `build/openbsd/<OPENBSD_VERSION>/<COMPAT_BACKEND>/<COMPAT_LANE_LEAF>/`, with `SECTION=all|ports|extra` selecting both or individual port trees.
 
 ## Declaring `libobsdcompat` (Declared, Never Searched)
 
-`obsd-ports` consumes `libobsdcompat` headers (`include-root-<ver>`), guest base libraries (`libobsdc-wasm-<ver>.a`), and `wasm_object_tool.py`. Following `libobsdcompat`'s convention, the `libobsdcompat` checkout is **declared, never searched**:
+`obsd-ports` consumes `libobsdcompat` headers (`include-root-<ver>`), guest base libraries (`libobsdc-wasm-<ver>.a` / `libobsdc-<ver>.a`), and `wasm_object_tool.py`. Following `libobsdcompat`'s convention, the `libobsdcompat` checkout is **declared, never searched**:
 
 1. Explicit environment or Make variable: `LIBOBSDCOMPAT_ROOT=/abs/path/to/libobsdcompat`
 2. Or a gitignored single-line file at the repository root:
@@ -24,7 +24,18 @@ All build outputs isolate cleanly under `build/openbsd/<OPENBSD_VERSION>/<COMPAT
 
 `make clean` works standalone with zero external dependencies.
 
-## Built & Verified Ports Catalog (80 Ports on OpenBSD 8.0, 67 on 7.9, 66 on 7.8)
+## Prerequisites & Build Order
+
+- **Python ≥ 3.11** for `build`/`fetch`/`package`/`check`/`list` (`tools/build_ports.py` uses `tomllib`). Make picks the newest `python3.1x` on `PATH` (falling back to `python3`) and fails early with a clear message on an older interpreter; override with `PYTHON=/path/to/python3.11+` (e.g. `PYTHON=/opt/homebrew/bin/python3.13` on macOS, whose `/usr/bin/python3` is 3.9). `sdk/bin/obsd-*` and recipe hooks reuse the same interpreter via `OBSD_PYTHON`. Metadata-only targets (`audit`, `list-catalog`, `import`, `sync-vendor`, `clean`) still run on Python 3.9.
+- **Host tools**: `gmake`, `cmake` (fastfetch), `autoconf`/`automake`/`libtool` (ugrep `autoreconf -fi` on 7.9), `perl`, `bison`, `xxd`, a host `clang`/`cc` (macOS: `brew install make cmake autoconf automake libtool pkgconf`).
+- **libobsdcompat outputs, built first.** obsd-ports never builds libobsdcompat; for `emulate/emscripten` it consumes, per release `<v>`:
+  - `$LIBOBSDCOMPAT_ROOT/deps/emsdk` (bootstrapped by libobsdcompat's `bootstrap_emsdk.sh` / `make wasm-emsdk`),
+  - `$LIBOBSDCOMPAT_ROOT/build/wasm-<v>/include-root-<v>/` and `libobsdc-wasm-<v>.a` (`make -C $LIBOBSDCOMPAT_ROOT COMPAT_BACKEND=emulate COMPAT_PAL=emscripten OPENBSD_VERSION=<v> wasm-guest`),
+  - `$LIBOBSDCOMPAT_ROOT/build/wasm-<v>/libobsd-wasm-host-<v>.a` for `make check` / `merge_wasm_guest.py` (`wasm-host`).
+
+  `make build`/`package` stop with the exact missing paths and the command to produce them. Port stamps fold in a content digest of `sdk/`, `include-root-<v>` and the emsdk release, so a libobsdcompat header change rebuilds dependent ports instead of leaving stale objects. From sonvori-terminal the per-release order is `make web-wasm RELEASE=<v> WEB_WASM_ARGS=--without-ports` → `make web-ports RELEASE=<v>` → `make web-wasm RELEASE=<v>`.
+
+## Built & Verified Ports Catalog (80 WASM64 Ports on OpenBSD 8.0, 67 on 7.9, 66 on 7.8; 53 Darwin Ports across 7.8–8.0)
 
 All ports compile with `sdk/bin/obsd-cc`, `sdk/bin/obsd-c++`, and `sdk/bin/obsd-cargo` (including native WASM64 C++17/23 `libc++.a` + `libc++abi.a` with `-fwasm-exceptions`, WASM `-msimd128` quantized tensor kernels, hermetic `-Z build-std=std,panic_abort` Rust WASM64 OpenBSD LP64 cross-compilation, and per-exec constructor/`thread_local!` banking) into **82 localized WASM64 applet closures** on OpenBSD `8.0` and `7.9` (**81** on `7.8`; **239** command paths on `8.0`, **235** command paths on `7.9` and `7.8`) plus pure-Python site-packages, console scripts, static `.a` developer libraries, headers, `pkg-config` `.pc` metadata, completions, configs, and manual pages:
 
@@ -155,7 +166,7 @@ make check OPENBSD_VERSION=7.9
 make check OPENBSD_VERSION=7.8
 make check SECTION=extra OPENBSD_VERSION=8.0
 
-# Run vendor immutability, extra ports anatomy, Make hierarchy, layout, and 21-lane matrix seam audits
+# Run vendor immutability, extra ports anatomy, Make hierarchy, layout, and 15-cell matrix seam audits
 make audit
 
 # Remove build/ (standalone)

@@ -7,7 +7,7 @@ obsd-ports/
 ├── Makefile                        # Guarded parser boundary -> mk/root/main.mk
 ├── config/
 │   ├── versions/                   # OpenBSD release axis (index.tsv, 7.8.mk, 7.9.mk, 8.0.mk, *-catalog.tsv)
-│   ├── matrix/                     # 7-cell Backend x PAL matrix (index.tsv, backends/*.mk, pals/*.mk)
+│   ├── matrix/                     # Canonical 5-cell Backend x PAL matrix (index.tsv, backends/*.mk, pals/*.mk)
 │   └── extra/                      # Extra ports manifest (index.tsv)
 ├── mk/
 │   ├── root/                       # Standalone clean + strict layer ordering
@@ -16,10 +16,10 @@ obsd-ports/
 │   └── rules/                      # sync-vendor, import, list, list-extra, fetch, build, package, check, audit
 ├── sdk/
 │   ├── bin/                        # obsd-cc, obsd-c++, obsd-ar, obsd-ranlib, obsd-ld, obsd-nm, obsd-strip, obsd-pkg-config, obsd-cargo, obsd-rust-ld
-│   ├── lib/obsd_toolchain.py       # Sysroot-remapping WASM64 compiler & symbol-verifying linker driver
+│   ├── lib/obsd_toolchain.py       # Sysroot-remapping WASM64 & Darwin Mach-O compiler/linker driver
 │   ├── rust/                       # wasm64-unknown-openbsd.json, obsd_rust.py, unwind_stub.c, 3D matrix Rust target mapper
-│   ├── autoconf/config.site        # Cross-compilation cache for GNU configure & gnulib
-│   └── cmake/openbsd-wasm64.cmake  # CMake cross-compilation toolchain
+│   ├── autoconf/                   # config.site & config.site.darwin
+│   └── cmake/                      # openbsd-wasm64.cmake & openbsd-darwin.cmake
 ├── vendor/openbsd/versions/
 │   ├── 7.8/ports/                  # Immutable OpenBSD 7.8 port Makefiles, distinfo, patches/*, pkg/*
 │   ├── 7.9/ports/                  # Immutable OpenBSD 7.9 port Makefiles, distinfo, patches/*, pkg/*
@@ -27,24 +27,25 @@ obsd-ports/
 ├── ports/                          # Declarative port build recipes (<category>/<name>/port.toml)
 ├── extra/                          # Self-contained OpenBSD-style extra ports (<category>/<name>/{Makefile,distinfo,pkg/*,port.toml})
 ├── targets/
-│   ├── emulate/{emscripten,wasi,darwin,ios}/
-│   └── translate/{darwin,ios,linux}/
+│   ├── common/                     # Shared packaging.py (+CONTENTS, +DESC, SVFS, fakeroot owners)
+│   ├── emulate/{emscripten,wasi,darwin}/
+│   └── translate/{darwin,linux}/
 ├── tools/
 │   ├── build_ports.py              # Distinfo parser, parallel fetcher, 3D matrix resolver, topological builder
 │   ├── extra/                      # gen_cargo_distinfo.py (crates.inc & distinfo generator for MODULES=devel/cargo)
 │   ├── vendor/                     # sync_openbsd_ports.py & import_port.py
-│   ├── config/                     # locate-libobsdcompat.sh
+│   ├── config/                     # locate-libobsdcompat.sh, obsd_versions.py, obsd_env.py
 │   ├── testing/                    # run_check.py
 │   └── audit/                      # vendor-baseline.tsv, audit_extra_ports.py & immutability/hierarchy/matrix audits
-└── tests/                          # Automated dual-release WASM64 port test suite
+└── tests/                          # Automated multi-release WASM64 & Darwin port test suites
 ```
 
-## 3D Matrix (`OPENBSD_VERSION x COMPAT_BACKEND x COMPAT_PAL` = 21 Lanes) & `extra/` Section
+## 3D Matrix (`OPENBSD_VERSION x COMPAT_BACKEND x COMPAT_PAL` = 15 Matrix Cells) & `extra/` Section
 
-1. **Release Axis (`config/versions/index.tsv`)**: OpenBSD `8.0` (`80` total ports: `77` `ports/*` + `3` `extra/*`), `7.9` (`67` total ports: `64` `ports/*` + `3` `extra/*`), and `7.8` (`66` total ports: `63` `ports/*` + `3` `extra/*`).
-2. **Backend x PAL Matrix (`config/matrix/index.tsv`)**: 7 cells (`3 x 7 = 21` total lanes):
-   - `emulate/{emscripten,wasi,darwin,ios}` (`COMPAT_PRODUCES_APPLETS := 1`, relocatable multi-call applet closures; `emulate/emscripten` active WASM64 lane, `ios` enforces strict W^X zero-JIT invariants).
-   - `translate/{darwin,ios,linux}` (`COMPAT_PRODUCES_APPLETS := 0`, standalone boundary executables).
+1. **Release Axis (`config/versions/index.tsv`)**: OpenBSD `8.0` (`80` WASM64 ports: `77` `ports/*` + `3` `extra/*`; `53` Darwin ports), `7.9` (`67` WASM64 ports; `53` Darwin ports), and `7.8` (`66` WASM64 ports; `53` Darwin ports).
+2. **Backend x PAL Matrix (`config/matrix/index.tsv`)**: Canonical 5 cells (`3 x 5 = 15` matrix cells):
+   - `emulate/{emscripten,wasi,darwin}` (`COMPAT_PRODUCES_APPLETS := 1`, relocatable multi-call applet closures; `emulate/emscripten` active WASM64 lane, `emulate/darwin` active multi-core banked iOS/iPadOS lane via `COMPAT_SDK=iphonesimulator|iphoneos` enforcing strict W^X zero-JIT invariants).
+   - `translate/{darwin,linux}` (`COMPAT_PRODUCES_APPLETS := 0`, standalone boundary executables; `translate/darwin` active macOS arm64 lane via `COMPAT_SDK=macosx`).
 3. **Dual Port Sections (`SECTION=all|ports|extra`)**:
    - `ports/<category>/<name>/port.toml` builds against immutable upstream metadata in `vendor/openbsd/versions/<ver>/ports/`.
    - `extra/<category>/<name>/` hosts self-contained OpenBSD-style ports (`Makefile`, `crates.inc`, `distinfo`, `pkg/DESCR`, `pkg/PLIST`, `patches/patch-*`, `port.toml`) indexed in `config/extra/index.tsv` and audited by `tools/audit/audit_extra_ports.py` (currently `devel/forgecode` `2.14.0`, `devel/goose` `1.60.2`, and `misc/aichat` `0.30.0`).

@@ -2,6 +2,8 @@
 
 End-to-end verification suite invoked via `make check OPENBSD_VERSION=8.0`, `make check OPENBSD_VERSION=7.9`, and `make check OPENBSD_VERSION=7.8`.
 
+Every suite takes `--openbsd-version <v>|<v1>,<v2>|"<v1> <v2>"|all`; `all` (the default) means every `verified` release in `config/versions/index.tsv` (resolved by `tools/config/obsd_versions.py`, never a hardcoded list). `test_release_axis.py` (run first by `make check`, Python ≥ 3.9, no build needed) checks `index.tsv` ↔ `<v>.mk` agreement, pins each release's `osrev_int` to OpenBSD's `sys/sys/param.h` (`7.8`=202510, `7.9`=202605, `8.0`=202610) and, when libobsdcompat is declared, cross-checks its `versions/index.tsv` and vendor `param.h`.
+
 ## What `run_wasm_ports_tests.py` Verifies
 
 1. **Build & Package Artifact Integrity (`7.8`, `7.9`, and `8.0`)**:

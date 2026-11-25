@@ -5,7 +5,7 @@ configure_default_args = false
 use_gmake = true
 
 pre_configure = [
-    "sed -i -E -e 's/^\\.ifdef /ifdef /' -e 's/^\\.if \\$\\(([A-Za-z0-9_]+)\\) == \"([^\"]*)\"/ifeq ($(\\1),\\2)/' -e 's/^\\.else$/else/' -e 's/^\\.endif$/endif/' Makefile",
+    "sed -i.bak -E -e 's/^\\.ifdef /ifdef /' -e 's/^\\.if \\$\\(([A-Za-z0-9_]+)\\) == \"([^\"]*)\"/ifeq ($(\\1),\\2)/' -e 's/^\\.else$/else/' -e 's/^\\.endif$/endif/' Makefile && rm -f Makefile.bak",
 ]
 
 configure_args = [

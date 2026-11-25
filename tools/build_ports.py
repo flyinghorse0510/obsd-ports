@@ -10,6 +10,16 @@ OpenBSD `7.8`/`7.9`/`8.0` release trees, including `MODULES = devel/cargo` via
 """
 from __future__ import annotations
 
+import sys
+
+if sys.version_info < (3, 11):  # tomllib (PEP 680) is stdlib only from 3.11 on
+    sys.stderr.write(
+        "build_ports: Python >= 3.11 is required (tomllib); %s is Python %d.%d.\n"
+        "build_ports: run `make ... PYTHON=/path/to/python3.11+` (e.g. PYTHON=/opt/homebrew/bin/python3.13).\n"
+        % ((sys.executable or "python3"), sys.version_info[0], sys.version_info[1])
+    )
+    raise SystemExit(2)
+
 import argparse
 import base64
 import binascii
@@ -29,7 +39,6 @@ import shutil
 import stat
 import struct
 import subprocess
-import sys
 import tarfile
 import tempfile
 import threading
@@ -40,6 +49,9 @@ import zlib
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "tools/config"))
+import obsd_versions  # noqa: E402  (release axis from config/versions/index.tsv)
+import obsd_env  # noqa: E402  (EMSDK_PYTHON pinning)
 
 DISTINFO_SHA256_RE = re.compile(r"^SHA256\s*\((.+)\)\s*=\s*(\S+)\s*$")
 DISTINFO_SIZE_RE = re.compile(r"^SIZE\s*\((.+)\)\s*=\s*(\d+)\s*$")
@@ -1347,10 +1359,111 @@ def parse_plist_bins(meta_dir: pathlib.Path) -> List[str]:
     return bins
 
 
+_TOOLCHAIN_DIGESTS: Dict[Tuple[str, str, str, str, str], str] = {}
+
+
+def resolve_lane_sdk(pal: str, backend: str, explicit_sdk: str = "") -> str:
+    if pal != "darwin":
+        return ""
+    sdk = (explicit_sdk or os.environ.get("COMPAT_SDK", "")).strip()
+    if not sdk:
+        sdk = "macosx" if backend == "translate" else "iphonesimulator"
+    if backend == "translate" and sdk != "macosx":
+        die(f"Darwin translate supports only COMPAT_SDK=macosx (got '{sdk}')", 2)
+    if backend == "emulate" and sdk not in ("iphonesimulator", "iphoneos", "macosx"):
+        die(f"Darwin emulate supports COMPAT_SDK=iphonesimulator|iphoneos|macosx (got '{sdk}')", 2)
+    return sdk
+
+
+def compute_lane_dir(
+    openbsd_version: str,
+    backend: str,
+    pal: str,
+    sdk: str = "",
+    build_root_arg: str = "",
+) -> pathlib.Path:
+    raw = build_root_arg.strip() or os.environ.get("BUILD_ROOT", "").strip()
+    base = pathlib.Path(raw).resolve() if raw else (REPO_ROOT / "build")
+    leaf = f"darwin-{sdk}" if pal == "darwin" and sdk else pal
+    return base / "openbsd" / openbsd_version / backend / leaf
+
+
+def _digest_tree(h: "hashlib._Hash", root: pathlib.Path, label: str) -> None:
+    h.update(f"[{label}]".encode())
+    if not root.exists():
+        h.update(b"<missing>")
+        return
+    for f in sorted(root.rglob("*")):
+        if "__pycache__" in f.parts:
+            continue
+        rel = f.relative_to(root).as_posix().encode()
+        if f.is_symlink():
+            h.update(rel + b"->" + os.readlink(f).encode())
+        elif f.is_file():
+            h.update(rel + b"=" + sha256_file(f).encode())
+
+
+def _semantic_identity_bytes(ident_path: pathlib.Path) -> bytes:
+    """Hash only compiler/header-defining identity keys so transient host PATHs in
+    `.object-build-identity` never invalidate clean port stamps."""
+    if not ident_path.is_file():
+        return b"<missing>"
+    keep = [
+        ln
+        for ln in ident_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        if ln.startswith(("V=", "BOUNDARY_SDK=", "INCLUDE_ROOT=", "BOUNDARY_ARCH_FLAGS=", "CONSUMER_CFLAGS="))
+    ]
+    return "\n".join(sorted(keep)).encode("utf-8")
+
+
+def toolchain_digest(obsd_root: pathlib.Path, openbsd_version: str, backend: str, pal: str, sdk: str = "") -> str:
+    """Content digest of everything a port compiles against besides its own
+    sources: sdk/ (wrappers, flags, autoconf/cmake), the libobsdcompat
+    `include-root-<v>` headers, and the lane identity/toolchain. Computed once per run."""
+    key = (str(obsd_root), openbsd_version, backend, pal, sdk)
+    if key not in _TOOLCHAIN_DIGESTS:
+        h = hashlib.sha256()
+        _digest_tree(h, REPO_ROOT / "sdk", "sdk")
+        if pal == "emscripten":
+            wasm_dir = obsd_root / f"build/wasm-{openbsd_version}"
+            _digest_tree(h, wasm_dir / f"include-root-{openbsd_version}", "include-root")
+            ver_txt = obsd_root / "deps/emsdk/upstream/emscripten/emscripten-version.txt"
+            h.update(b"[emsdk]" + (ver_txt.read_bytes() if ver_txt.is_file() else b"<missing>"))
+        elif pal == "darwin":
+            if backend == "translate":
+                vec = obsd_root / f"build/openbsd/{openbsd_version}/translate/gen/guest-configure/tool-probe-vector.tsv"
+                ident = obsd_root / f"build/openbsd-boundary/obj-{openbsd_version}-kern-gate/.object-build-identity"
+                h.update(b"[vec]" + (vec.read_bytes() if vec.is_file() else b"<missing>"))
+                h.update(b"[ident]" + _semantic_identity_bytes(ident))
+            else:
+                ident = obsd_root / f"build/openbsd-boundary/obj-{openbsd_version}-kern-gate-emulate-{sdk}/.object-build-identity"
+                h.update(b"[ident]" + _semantic_identity_bytes(ident))
+                _digest_tree(h, obsd_root / "tools/build/llvm-guest-bank", "llvm-guest-bank")
+        _TOOLCHAIN_DIGESTS[key] = h.hexdigest()
+    return _TOOLCHAIN_DIGESTS[key]
+
+
+def host_python_shim_dir() -> pathlib.Path:
+    """Directory whose `python3` is this (>=3.11) interpreter, so recipe hooks
+    (`python3 -I "$PORT_DIR/..."`) never fall back to an older system python3."""
+    d = REPO_ROOT / ".cache/sdk/host-python"
+    d.mkdir(parents=True, exist_ok=True)
+    link = d / "python3"
+    target = pathlib.Path(sys.executable)
+    if not (link.is_symlink() and os.readlink(link) == str(target)):
+        tmp = d / f".python3.{os.getpid()}"
+        if tmp.is_symlink() or tmp.exists():
+            tmp.unlink()
+        tmp.symlink_to(target)
+        os.replace(tmp, link)
+    return d
+
+
 def make_sdk_env(
     openbsd_version: str,
     backend: str,
     pal: str,
+    sdk: str,
     obsd_root: pathlib.Path,
     stage_dir: pathlib.Path,
     wrksrc: pathlib.Path,
@@ -1362,13 +1475,20 @@ def make_sdk_env(
     jobs: int,
 ) -> Dict[str, str]:
     sdk_bin = REPO_ROOT / "sdk/bin"
+    guest_arch = "arm64" if pal == "darwin" else "wasm64"
     env = dict(os.environ)
     env["OBSD_PORTS_ROOT"] = str(REPO_ROOT)
     env["LIBOBSDCOMPAT_ROOT"] = str(obsd_root)
     env["OPENBSD_VERSION"] = openbsd_version
     env["COMPAT_BACKEND"] = backend
     env["COMPAT_PAL"] = pal
+    if sdk:
+        env["COMPAT_SDK"] = sdk
+    else:
+        env.pop("COMPAT_SDK", None)
+    env["OBSD_GUEST_ARCH"] = guest_arch
     env["OBSD_STAGE_DIR"] = str(stage_dir)
+    env["OBSD_PYTHON"] = sys.executable  # sdk/bin/obsd-* reuse this >=3.11 interpreter
 
     cc = str(sdk_bin / "obsd-cc")
     cxx = str(sdk_bin / "obsd-c++")
@@ -1380,10 +1500,14 @@ def make_sdk_env(
     pkg_cfg = str(sdk_bin / "obsd-pkg-config")
     install_bin = str(sdk_bin / "obsd-install")
     cargo_bin = str(sdk_bin / "obsd-cargo")
-    config_site = str(REPO_ROOT / "sdk/autoconf/config.site")
-    cmake_tc = str(REPO_ROOT / "sdk/cmake/openbsd-wasm64.cmake")
+    config_site = str(
+        REPO_ROOT / ("sdk/autoconf/config.site.darwin" if pal == "darwin" else "sdk/autoconf/config.site")
+    )
+    cmake_tc = str(
+        REPO_ROOT / ("sdk/cmake/openbsd-darwin.cmake" if pal == "darwin" else "sdk/cmake/openbsd-wasm64.cmake")
+    )
 
-    env["PATH"] = f"{sdk_bin}:{env.get('PATH', '/usr/bin:/bin')}"
+    env["PATH"] = f"{sdk_bin}:{host_python_shim_dir()}:{env.get('PATH', '/usr/bin:/bin')}"
     env["CC"] = cc
     env["CXX"] = cxx
     env["CPP"] = f"{cc} -E"
@@ -1407,6 +1531,8 @@ def make_sdk_env(
     env["CC_FOR_BUILD"] = host_cc
     env["BUILD_CC"] = host_cc
     env["HOSTCC"] = host_cc
+    if not shutil.which("makeinfo"):
+        env.setdefault("MAKEINFO", "true")
 
     base_cf = ["-O2", *recipe.get("cflags", [])]
     base_cxxf = ["-O2", *recipe.get("cxxflags", [])]
@@ -1449,7 +1575,7 @@ def make_sdk_env(
             env.setdefault(k, v)
 
     for k, v in recipe.get("env", {}).items():
-        env[str(k)] = str(v)
+        env[str(k)] = str(v).replace("${OBSD_GUEST_ARCH}", guest_arch)
 
     return env
 
@@ -1521,6 +1647,7 @@ def build_single_port(
     obsd_root: pathlib.Path,
     lane_dir: pathlib.Path,
     jobs: int,
+    sdk: str = "",
     force: bool = False,
     repo_root: Optional[pathlib.Path] = None,
 ) -> Dict[str, Any]:
@@ -1537,6 +1664,7 @@ def build_single_port(
         port_dir=port_dir,
         section=section,
     )
+    lane_tag = f"{backend}/darwin-{sdk}" if pal == "darwin" and sdk else f"{backend}/{pal}"
 
     stage_dir = lane_dir / "stage"
     stage_dir.mkdir(parents=True, exist_ok=True)
@@ -1568,6 +1696,9 @@ def build_single_port(
             sig_h.update(sha256_file(pf).encode())
     for _df_path, df_ent in fetched:
         sig_h.update(df_ent["sha256"].encode())
+    # Header/SDK dependencies: a changed libobsdcompat include-root, SDK wrapper
+    # or emsdk release must rebuild ports (no stale objects after a lib update).
+    sig_h.update(toolchain_digest(obsd_root, openbsd_version, backend, pal, sdk).encode())
     build_sig = sig_h.hexdigest()
 
     if not force and stamp_file.is_file():
@@ -1581,7 +1712,7 @@ def build_single_port(
                 print(f"[build/{openbsd_version}] {port_name} ({pkgname}): up-to-date")
                 return old
 
-    print(f"==> [build/{openbsd_version}] building {port_name} ({pkgname}) [{section} | {backend}/{pal}]...")
+    print(f"==> [build/{openbsd_version}] building {port_name} ({pkgname}) [{section} | {lane_tag}]...")
     work_port_dir = lane_dir / "work" / port_name
     if work_port_dir.exists():
         shutil.rmtree(work_port_dir)
@@ -1692,6 +1823,7 @@ def build_single_port(
         openbsd_version=openbsd_version,
         backend=backend,
         pal=pal,
+        sdk=sdk,
         obsd_root=obsd_root,
         stage_dir=stage_dir,
         wrksrc=wrksrc,
@@ -1702,6 +1834,8 @@ def build_single_port(
         recipe=recipe,
         jobs=jobs,
     )
+    guest_arch = env["OBSD_GUEST_ARCH"]
+    exp_args = lambda seq: [str(x).replace("${OBSD_GUEST_ARCH}", guest_arch) for x in seq]
 
     make_prog = (shutil.which("gmake") or "make") if recipe.get("use_gmake", True) else "make"
     before_snap = snapshot_tree(stage_dir)
@@ -1788,6 +1922,7 @@ def build_single_port(
                         backend,
                         "--pal",
                         pal,
+                        *(["--sdk", sdk] if sdk else []),
                     ],
                     text=True,
                 )
@@ -1820,7 +1955,8 @@ def build_single_port(
         if style in ("gnu", "simple"):
             cfg_rel = recipe.get("configure_script", "./configure")
             cfg_bin = (wrksrc / cfg_rel).resolve() if not os.path.isabs(cfg_rel) else pathlib.Path(cfg_rel)
-            host_arch = platform.machine() or "x86_64"
+            raw_arch = (platform.machine() or "x86_64").lower()
+            host_arch = {"arm64": "aarch64", "amd64": "x86_64"}.get(raw_arch, raw_arch)
             cfg_cmd: List[str] = ["sh", str(cfg_bin)]
             if recipe.get("configure_host", style == "gnu"):
                 cfg_cmd.extend(
@@ -1839,7 +1975,7 @@ def build_single_port(
                         "--enable-static",
                     ]
                 )
-            cfg_cmd.extend(recipe.get("configure_args", []))
+            cfg_cmd.extend(exp_args(recipe.get("configure_args", [])))
             run_step(cfg_cmd, wrkbuild, env, f"{port_name}:configure")
 
         elif style == "cmake":
@@ -1849,12 +1985,12 @@ def build_single_port(
                 str(wrksrc),
                 "-B",
                 str(wrkbuild),
-                f"-DCMAKE_TOOLCHAIN_FILE={REPO_ROOT / 'sdk/cmake/openbsd-wasm64.cmake'}",
+                f"-DCMAKE_TOOLCHAIN_FILE={env['CMAKE_TOOLCHAIN_FILE']}",
                 "-DCMAKE_BUILD_TYPE=Release",
                 "-DCMAKE_INSTALL_PREFIX=/usr/local",
                 "-DCMAKE_INSTALL_MANDIR=/usr/local/man",
                 "-DBUILD_SHARED_LIBS=OFF",
-                *recipe.get("cmake_args", []),
+                *exp_args(recipe.get("cmake_args", [])),
             ]
             run_step(cmake_cmd, wrkbuild, env, f"{port_name}:cmake-configure")
 
@@ -1873,9 +2009,9 @@ def build_single_port(
             for bcmd in recipe["build_cmd"]:
                 run_step(bcmd, wrkbuild, env, f"{port_name}:build")
         elif style == "cmake":
-            run_step(["cmake", "--build", str(wrkbuild), "-j", str(jobs), *recipe.get("make_args", [])], wrkbuild, env, f"{port_name}:cmake-build")
+            run_step(["cmake", "--build", str(wrkbuild), "-j", str(jobs), *exp_args(recipe.get("make_args", []))], wrkbuild, env, f"{port_name}:cmake-build")
         else:
-            m_cmd = [make_prog, f"-j{jobs}", *recipe.get("make_args", []), *recipe.get("make_targets", [])]
+            m_cmd = [make_prog, f"-j{jobs}", *exp_args(recipe.get("make_args", [])), *exp_args(recipe.get("make_targets", []))]
             run_step(m_cmd, wrkbuild, env, f"{port_name}:make")
 
         if recipe.get("install_cmd"):
@@ -1890,7 +2026,7 @@ def build_single_port(
             if inst_target:
                 use_destdir = recipe.get("install_use_destdir", True)
                 dest_args = [f"DESTDIR={stage_dir}"] if use_destdir else [f"PREFIX={stage_dir}/usr/local"]
-                i_cmd = [make_prog, inst_target, *dest_args, *recipe.get("install_args", [])]
+                i_cmd = [make_prog, inst_target, *dest_args, *exp_args(recipe.get("install_args", []))]
                 run_step(i_cmd, wrkbuild, env, f"{port_name}:install")
 
     for hook in recipe.get("post_install", []):
@@ -1913,11 +2049,13 @@ def build_single_port(
         "installed_files": installed_files,
         "applets": recipe.get("applets", []),
     }
-    if section == "extra":
-        comment, descr = get_port_comment_and_descr(vendor_ports_dir, vport, port_dir, section)
+    if sdk:
+        record["sdk"] = sdk
+    comment, descr = get_port_comment_and_descr(vendor_ports_dir, vport, port_dir, section)
+    if comment:
         record["comment"] = comment
+    if descr:
         record["descr"] = descr
-
     stamp_file.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     print(f"[build/{openbsd_version}] finished {port_name} ({pkgname}): {len(installed_files)} staged entries")
     return record
@@ -1971,6 +2109,7 @@ def cmd_list_catalog(args: argparse.Namespace) -> int:
 
 
 def cmd_list(args: argparse.Namespace) -> int:
+    sdk = resolve_lane_sdk(args.pal, args.backend, args.sdk)
     recipes = discover_recipes(
         args.openbsd_version,
         [args.port] if args.port else None,
@@ -1979,7 +2118,7 @@ def cmd_list(args: argparse.Namespace) -> int:
         section=args.section,
         include_cross_section_deps=bool(args.port),
     )
-    lane_dir = resolve_build_lane_dir(args.openbsd_version, args.backend, args.pal, args.build_root)
+    lane_dir = compute_lane_dir(args.openbsd_version, args.backend, args.pal, sdk, args.build_root)
     vendor_ports_dir = REPO_ROOT / "vendor/openbsd/versions" / args.openbsd_version / "ports"
 
     if not recipes:
@@ -2031,8 +2170,57 @@ def cmd_fetch(args: argparse.Namespace) -> int:
     return 0
 
 
+def require_libobsdcompat_lane_outputs(
+    obsd_root: pathlib.Path, openbsd_version: str, backend: str, pal: str, sdk: str = ""
+) -> None:
+    """obsd-ports consumes libobsdcompat build outputs; it never builds them."""
+    if pal == "emscripten":
+        wasm_dir = obsd_root / f"build/wasm-{openbsd_version}"
+        need = [
+            obsd_root / "deps/emsdk/upstream/emscripten/emcc",
+            wasm_dir / f"include-root-{openbsd_version}",
+            wasm_dir / f"libobsdc-wasm-{openbsd_version}.a",
+        ]
+        missing = [str(p) for p in need if not p.exists()]
+        if missing:
+            die(
+                "missing libobsdcompat emscripten outputs for OpenBSD "
+                f"{openbsd_version}:\n  " + "\n  ".join(missing) + "\n"
+                "build them first (base guest before ports):\n"
+                f"  make -C {obsd_root} COMPAT_BACKEND=emulate COMPAT_PAL=emscripten "
+                f"OPENBSD_VERSION={openbsd_version} wasm-emsdk wasm-guest\n"
+                f"  (sonvori-terminal: make web-wasm RELEASE={openbsd_version} WEB_WASM_ARGS=--without-ports)"
+            )
+        return
+
+    if pal == "darwin":
+        if backend == "translate":
+            need = [
+                obsd_root / f"build/openbsd/{openbsd_version}/translate/gen/guest-configure/tool-probe-vector.tsv",
+                obsd_root / f"build/openbsd-boundary/obj-{openbsd_version}-kern-gate/libobsdc-{openbsd_version}.a",
+                obsd_root / f"build/openbsd-boundary/include-roots/{openbsd_version}-kern-gate/compiler-include-root-{openbsd_version}-kern-gate",
+            ]
+        else:
+            need = [
+                obsd_root / f"build/openbsd-boundary/obj-{openbsd_version}-kern-gate-emulate-{sdk}/libobsdc-{openbsd_version}.a",
+                obsd_root / f"build/openbsd-boundary/obj-{openbsd_version}-kern-gate-emulate-{sdk}/.object-build-identity",
+                obsd_root / f"build/openbsd-boundary/include-roots/{openbsd_version}-kern-gate-emulate-{sdk}/compiler-include-root-{openbsd_version}-kern-gate-emulate-{sdk}",
+            ]
+        missing = [str(p) for p in need if not p.exists()]
+        if missing:
+            die(
+                f"missing libobsdcompat Darwin ({backend}/{sdk}) outputs for OpenBSD {openbsd_version}:\n  "
+                + "\n  ".join(missing)
+                + f"\n  (sonvori-terminal: scripts/build-backend.sh --sdk {sdk} --release {openbsd_version})"
+            )
+
+
 def cmd_build(args: argparse.Namespace) -> int:
+    sdk = resolve_lane_sdk(args.pal, args.backend, args.sdk)
     obsd_root = resolve_obsd_root_arg(args.libobsdcompat_root)
+    require_libobsdcompat_lane_outputs(obsd_root, args.openbsd_version, args.backend, args.pal, sdk)
+    if args.pal == "emscripten":
+        obsd_env.ensure_emsdk_python(obsd_root)
     recipes = discover_recipes(
         args.openbsd_version,
         [args.port] if args.port else None,
@@ -2041,7 +2229,7 @@ def cmd_build(args: argparse.Namespace) -> int:
         section=args.section,
         include_cross_section_deps=True,
     )
-    lane_dir = resolve_build_lane_dir(args.openbsd_version, args.backend, args.pal, args.build_root)
+    lane_dir = compute_lane_dir(args.openbsd_version, args.backend, args.pal, sdk, args.build_root)
     lane_dir.mkdir(parents=True, exist_ok=True)
     if not recipes:
         print(f"[build/{args.openbsd_version}] 0 port recipes in section '{args.section}' (nothing to build)")
@@ -2052,6 +2240,7 @@ def cmd_build(args: argparse.Namespace) -> int:
             openbsd_version=args.openbsd_version,
             backend=args.backend,
             pal=args.pal,
+            sdk=sdk,
             obsd_root=obsd_root,
             lane_dir=lane_dir,
             jobs=args.jobs,
@@ -2061,8 +2250,12 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 
 def cmd_package(args: argparse.Namespace) -> int:
+    sdk = resolve_lane_sdk(args.pal, args.backend, args.sdk)
     obsd_root = resolve_obsd_root_arg(args.libobsdcompat_root)
-    lane_dir = resolve_build_lane_dir(args.openbsd_version, args.backend, args.pal, args.build_root)
+    require_libobsdcompat_lane_outputs(obsd_root, args.openbsd_version, args.backend, args.pal, sdk)
+    if args.pal == "emscripten":
+        obsd_env.ensure_emsdk_python(obsd_root)
+    lane_dir = compute_lane_dir(args.openbsd_version, args.backend, args.pal, sdk, args.build_root)
     lane_dir.mkdir(parents=True, exist_ok=True)
 
     adapter_script = REPO_ROOT / "targets" / args.backend / args.pal / f"package_{'wasm' if args.pal in ('emscripten', 'wasi') else args.pal}.py"
@@ -2091,16 +2284,17 @@ def cmd_package(args: argparse.Namespace) -> int:
             sec = rec.get("section", "ports")
             data["section"] = sec
             data["applets"] = rec.get("applets", [])
-            if sec == "extra":
-                if not data.get("comment") or not data.get("descr"):
-                    comment, descr = get_port_comment_and_descr(
-                        vendor_ports_dir,
-                        rec["vendor_port"],
-                        rec["port_dir"],
-                        sec,
-                    )
-                    data.setdefault("comment", comment)
-                    data.setdefault("descr", descr)
+            if not data.get("comment") or not data.get("descr"):
+                comment, descr = get_port_comment_and_descr(
+                    vendor_ports_dir,
+                    rec["vendor_port"],
+                    rec["port_dir"],
+                    sec,
+                )
+                if comment and not data.get("comment"):
+                    data["comment"] = comment
+                if descr and not data.get("descr"):
+                    data["descr"] = descr
             records.append(data)
     manifest_file.write_text(json.dumps(records, indent=2) + "\n", encoding="utf-8")
 
@@ -2114,6 +2308,7 @@ def cmd_package(args: argparse.Namespace) -> int:
         args.backend,
         "--pal",
         args.pal,
+        *(["--sdk", sdk] if sdk else []),
         "--libobsdcompat-root",
         str(obsd_root),
         "--lane-dir",
@@ -2129,16 +2324,18 @@ def main() -> int:
     sub = ap.add_subparsers(dest="subcmd", required=True)
 
     p_cat = sub.add_parser("list-catalog")
-    p_cat.add_argument("--openbsd-version", default="8.0")
+    default_ver = obsd_versions.default_version()
+    p_cat.add_argument("--openbsd-version", default=default_ver)
     p_cat.add_argument("--filter", default="")
 
     for name in ("list", "fetch", "build", "package"):
         sp = sub.add_parser(name)
-        sp.add_argument("--openbsd-version", default="8.0")
+        sp.add_argument("--openbsd-version", default=default_ver)
         sp.add_argument("--backend", default="emulate")
         sp.add_argument("--pal", default="emscripten")
         sp.add_argument("--section", default="all", choices=("all", "ports", "extra"))
         sp.add_argument("--build-root", default="")
+        sp.add_argument("--sdk", default="")
         sp.add_argument("--libobsdcompat-root", default="")
         sp.add_argument("--port", default="")
         sp.add_argument("--jobs", type=int, default=os.cpu_count() or 8)
@@ -2146,6 +2343,12 @@ def main() -> int:
             sp.add_argument("--force", action="store_true")
 
     args = ap.parse_args()
+    if getattr(args, "libobsdcompat_root", "") and getattr(args, "pal", "emscripten") == "emscripten":
+        obsd_env.ensure_emsdk_python(args.libobsdcompat_root)
+    try:
+        obsd_versions.require_verified(args.openbsd_version)
+    except obsd_versions.ReleaseConfigError as exc:
+        die(str(exc), 2)
     if args.subcmd == "list-catalog":
         return cmd_list_catalog(args)
     if args.subcmd == "list":

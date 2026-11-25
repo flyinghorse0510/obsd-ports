@@ -4,7 +4,7 @@ cargo_bins = ["aichat"]
 
 only_for_versions = ["7.8", "7.9", "8.0"]
 only_for_backends = ["emulate", "translate"]
-only_for_pals = ["emscripten", "wasi", "darwin", "ios", "linux"]
+only_for_pals = ["emscripten"]
 
 post_install = [
     "$INSTALL_DATA_DIR \"$STAGE_DIR/usr/local/share/bash-completion/completions\"",
@@ -37,11 +37,8 @@ applets = []
 [pals.emscripten]
 env = { TOKIO_WORKER_THREADS = "2", RAYON_NUM_THREADS = "2" }
 
-[pals.ios]
-env = { OBSD_IOS_WX_JIT_FREE = "1" }
-
 [pals.darwin]
-env = { OBSD_DARWIN_SEAM = "1" }
+env = { OBSD_DARWIN_WX_JIT_FREE = "1" }
 
 [pals.wasi]
 env = { OBSD_WASI_HEADLESS = "1" }
@@ -52,5 +49,5 @@ env = { OBSD_LINUX_SEAM = "1" }
 [targets."emulate/emscripten"]
 env = { TOKIO_WORKER_THREADS = "2", RAYON_NUM_THREADS = "2" }
 
-[targets."emulate/ios"]
-env = { OBSD_IOS_EMULATE_APPLET = "1" }
+[targets."emulate/darwin"]
+env = { OBSD_DARWIN_EMULATE_APPLET = "1" }

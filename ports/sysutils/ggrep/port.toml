@@ -12,13 +12,12 @@ configure_args = [
 ]
 
 post_install = [
-    "sed -i '1s|^#!.*|#!/bin/sh|' \"$STAGE_DIR/usr/local/bin/gegrep\" \"$STAGE_DIR/usr/local/bin/gfgrep\"",
+    "sed -i.bak '1s|^#!.*|#!/bin/sh|' \"$STAGE_DIR/usr/local/bin/gegrep\" \"$STAGE_DIR/usr/local/bin/gfgrep\" && rm -f \"$STAGE_DIR/usr/local/bin/gegrep.bak\" \"$STAGE_DIR/usr/local/bin/gfgrep.bak\"",
 ]
 
 [env]
 POSIX_SHELL = "/bin/sh"
 ac_cv_libsigsegv = "no"
-gl_cv_host_cpu_c_abi = "wasm64"
 
 [[applets]]
 sym = "ggrep"

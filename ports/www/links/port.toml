@@ -10,7 +10,7 @@ cflags = [
 ]
 
 pre_configure = [
-    "cp -f /usr/share/misc/config.sub /usr/share/misc/config.guess \"$WRKSRC/\"",
+    "for d in /usr/share/misc /usr/share/automake-* /opt/homebrew/share/automake-* /usr/local/share/automake-*; do if [ -f \"$d/config.sub\" ] && [ -f \"$d/config.guess\" ]; then cp -f \"$d/config.sub\" \"$d/config.guess\" \"$WRKSRC/\" && exit 0; fi; done; echo 'www/links: missing config.sub/config.guess (install automake)' >&2; exit 1",
 ]
 
 configure_args = [

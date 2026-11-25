@@ -5,7 +5,10 @@ obsd_rust.py -- Hermetic OpenBSD `MODULES = devel/cargo` SDK & Linker Driver.
 Implements:
   1. 3D matrix target mapping (`(OPENBSD_VERSION, COMPAT_BACKEND, COMPAT_PAL)` ->
      `wasm64-unknown-openbsd.json` on `emulate/emscripten` and seam triples across
-     `emulate/{wasi,darwin,ios}` and `translate/{darwin,ios,linux}`).
+     the canonical 5-cell matrix `emulate/{emscripten,wasi,darwin}` and
+     `translate/{darwin,linux}`, resolving `COMPAT_SDK` on `darwin` so
+     `emulate/darwin` maps to `aarch64-apple-ios-sim` / `aarch64-apple-ios` and
+     `translate/darwin` maps to `aarch64-apple-darwin`).
   2. Idempotent, file-locked bootstrap of `rustup` (`nightly` + `rust-src`) into
      `.cache/sdk/host-rust` so concurrent invocations never race.
   3. Idempotent, file-locked preparation of:
@@ -59,7 +62,7 @@ REPO_ROOT = SDK_ROOT.parent
 
 PATCH_SCHEMA_VERSION = "obsd-wasm64-rust-v1"
 
-# 7-cell Backend x PAL Rust target matrix
+# Canonical 5-cell Backend x PAL Rust target matrix
 MATRIX_RUST_TARGETS: Dict[Tuple[str, str], Dict[str, Any]] = {
     ("emulate", "emscripten"): {
         "status": "active",
@@ -86,22 +89,12 @@ MATRIX_RUST_TARGETS: Dict[Tuple[str, str], Dict[str, Any]] = {
     ("emulate", "darwin"): {
         "status": "seam",
         "kind": "builtin",
-        "target_name": "aarch64-apple-darwin",
-        "cargo_env_suffix": "aarch64_apple_darwin",
-        "cargo_upper_suffix": "AARCH64_APPLE_DARWIN",
+        "target_name": "aarch64-apple-ios-sim",
+        "cargo_env_suffix": "aarch64_apple_ios_sim",
+        "cargo_upper_suffix": "AARCH64_APPLE_IOS_SIM",
         "needs_build_std": False,
         "jit_free": True,
-        "notes": "macOS arm64 crunched Mach-O emulate seam",
-    },
-    ("emulate", "ios"): {
-        "status": "seam",
-        "kind": "builtin",
-        "target_name": "aarch64-apple-ios",
-        "cargo_env_suffix": "aarch64_apple_ios",
-        "cargo_upper_suffix": "AARCH64_APPLE_IOS",
-        "needs_build_std": False,
-        "jit_free": True,
-        "notes": "iOS/iPadOS arm64 strict W^X zero-JIT Mach-O emulate seam",
+        "notes": "iOS/iPadOS & Darwin arm64 strict W^X zero-JIT Mach-O emulate seam (COMPAT_SDK=iphonesimulator|iphoneos|macosx)",
     },
     ("translate", "darwin"): {
         "status": "seam",
@@ -111,17 +104,7 @@ MATRIX_RUST_TARGETS: Dict[Tuple[str, str], Dict[str, Any]] = {
         "cargo_upper_suffix": "AARCH64_APPLE_DARWIN",
         "needs_build_std": False,
         "jit_free": True,
-        "notes": "macOS arm64 standalone Mach-O translate boundary seam",
-    },
-    ("translate", "ios"): {
-        "status": "seam",
-        "kind": "builtin",
-        "target_name": "aarch64-apple-ios",
-        "cargo_env_suffix": "aarch64_apple_ios",
-        "cargo_upper_suffix": "AARCH64_APPLE_IOS",
-        "needs_build_std": False,
-        "jit_free": True,
-        "notes": "iOS/iPadOS arm64 strict W^X zero-JIT translate boundary seam",
+        "notes": "macOS arm64 standalone Mach-O translate boundary seam (COMPAT_SDK=macosx)",
     },
     ("translate", "linux"): {
         "status": "seam",
@@ -197,7 +180,12 @@ def resolve_libobsdcompat_root() -> pathlib.Path:
     return pathlib.Path(proc.stdout.strip()).resolve()
 
 
-def resolve_rust_matrix_target(openbsd_version: str, backend: str, pal: str) -> Dict[str, Any]:
+def resolve_rust_matrix_target(
+    openbsd_version: str,
+    backend: str,
+    pal: str,
+    sdk: str = "",
+) -> Dict[str, Any]:
     cell = MATRIX_RUST_TARGETS.get((backend, pal))
     if cell is None:
         die(
@@ -208,6 +196,30 @@ def resolve_rust_matrix_target(openbsd_version: str, backend: str, pal: str) -> 
     out["openbsd_version"] = openbsd_version
     out["backend"] = backend
     out["pal"] = pal
+    if pal == "darwin":
+        resolved_sdk = (sdk or os.environ.get("COMPAT_SDK", "")).strip()
+        if not resolved_sdk:
+            resolved_sdk = "macosx" if backend == "translate" else "iphonesimulator"
+        if backend == "translate":
+            if resolved_sdk != "macosx":
+                die(f"Darwin translate supports only COMPAT_SDK=macosx (got {resolved_sdk!r})")
+            target_triple = "aarch64-apple-darwin"
+        else:
+            if resolved_sdk == "iphoneos":
+                target_triple = "aarch64-apple-ios"
+            elif resolved_sdk == "iphonesimulator":
+                target_triple = "aarch64-apple-ios-sim"
+            elif resolved_sdk == "macosx":
+                target_triple = "aarch64-apple-darwin"
+            else:
+                die(
+                    "Darwin emulate supports COMPAT_SDK=iphonesimulator|iphoneos|macosx "
+                    f"(got {resolved_sdk!r})"
+                )
+        out["sdk"] = resolved_sdk
+        out["target_name"] = target_triple
+        out["cargo_env_suffix"] = target_triple.replace("-", "_")
+        out["cargo_upper_suffix"] = target_triple.replace("-", "_").upper()
     if out["kind"] == "custom_json":
         spec_path = (REPO_ROOT / out["target_spec_rel"]).resolve()
         if not spec_path.is_file():
@@ -1266,6 +1278,7 @@ def run_obsd_cargo(argv: Sequence[str]) -> int:
     openbsd_version = os.environ.get("OPENBSD_VERSION", "8.0").strip() or "8.0"
     backend = os.environ.get("COMPAT_BACKEND", "emulate").strip() or "emulate"
     pal = os.environ.get("COMPAT_PAL", "emscripten").strip() or "emscripten"
+    sdk = os.environ.get("COMPAT_SDK", "").strip()
 
     if argv and argv[0] == "target-info":
         # Lightweight query mode (no rustup bootstrap required)
@@ -1275,12 +1288,13 @@ def run_obsd_cargo(argv: Sequence[str]) -> int:
         ap.add_argument("--openbsd-version", default=openbsd_version)
         ap.add_argument("--backend", default=backend)
         ap.add_argument("--pal", default=pal)
+        ap.add_argument("--sdk", default=sdk)
         ns = ap.parse_args(list(argv[1:]))
-        info = resolve_rust_matrix_target(ns.openbsd_version, ns.backend, ns.pal)
+        info = resolve_rust_matrix_target(ns.openbsd_version, ns.backend, ns.pal, ns.sdk)
         print(json.dumps(info, indent=2, sort_keys=True))
         return 0
 
-    target_cfg = resolve_rust_matrix_target(openbsd_version, backend, pal)
+    target_cfg = resolve_rust_matrix_target(openbsd_version, backend, pal, sdk)
     obsd_root = resolve_libobsdcompat_root()
     cache_sdk = resolve_cache_sdk_dir()
 

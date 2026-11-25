@@ -1,4 +1,5 @@
 port = "misc/llama.cpp"
+only_for_pals = ["emscripten"]
 depends = ["devel/libggml", "net/curl"]
 build_style = "cmake"
 separate_build = true

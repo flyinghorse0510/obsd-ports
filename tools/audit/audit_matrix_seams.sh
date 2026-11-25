@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# audit_matrix_seams.sh -- Verify release axis (`7.8`, `7.9`, `8.0`) and 7-cell
-# Backend x PAL matrix (`emulate/{emscripten,wasi,darwin,ios}`,
-# `translate/{darwin,ios,linux}` -> 3 x 7 = 21 lanes) across manifests, Make
-# fragments, target adapter scripts, and `sdk/rust/` target mappings.
+# audit_matrix_seams.sh -- Verify the release axis (config/versions/index.tsv) and
+# canonical 5-cell Backend x PAL matrix (config/matrix/index.tsv:
+# emulate/{emscripten,wasi,darwin} + translate/{darwin,linux}) across manifests,
+# Make fragments, target adapter scripts, and sdk/rust/ target mappings.
+# tools/config/obsd_versions.py also checks index.tsv <-> <ver>.mk agreement and,
+# when libobsdcompat is declared, the vendor sys/sys/param.h osrev and that every
+# release is verified in libobsdcompat's own versions/index.tsv.
 set -euo pipefail
 
 repo_root=${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
@@ -34,17 +37,15 @@ for raw in (root / "config/versions/index.tsv").read_text(encoding="utf-8").spli
     if len(sha) != 64:
         raise SystemExit(f"matrix audit failed: invalid SHA256 for {ver}")
 
-if len(ver_rows) < 3:
-    raise SystemExit("matrix audit failed: expected at least OpenBSD 7.8, 7.9, and 8.0 in config/versions/index.tsv")
+if not ver_rows:
+    raise SystemExit("matrix audit failed: no releases declared in config/versions/index.tsv")
 
-# 2. Verify config/matrix/index.tsv (all 7 cells)
+# 2. Verify config/matrix/index.tsv (canonical 5 cells)
 expected_cells = {
     ("emulate", "emscripten"),
     ("emulate", "wasi"),
     ("emulate", "darwin"),
-    ("emulate", "ios"),
     ("translate", "darwin"),
-    ("translate", "ios"),
     ("translate", "linux"),
 }
 mat_rows = []
@@ -70,9 +71,9 @@ for raw in (root / "config/matrix/index.tsv").read_text(encoding="utf-8").splitl
         raise SystemExit(f"matrix audit failed: missing adapter script {pkg_script}")
 
 if seen_cells != expected_cells:
-    raise SystemExit(f"matrix audit failed: expected 7 cells {sorted(expected_cells)}, got {sorted(seen_cells)}")
+    raise SystemExit(f"matrix audit failed: expected 5 cells {sorted(expected_cells)}, got {sorted(seen_cells)}")
 
-# 3. Verify all 3 x 7 = 21 lanes resolve cleanly in `sdk/rust/obsd_rust.py`
+# 3. Verify all releases x 5 cells (= 15 matrix cells, including Darwin COMPAT_SDK variants) in `sdk/rust/obsd_rust.py`
 obsd_rust = root / "sdk/rust/obsd_rust.py"
 lane_count = 0
 for ver_cols in ver_rows:
@@ -97,9 +98,36 @@ for ver_cols in ver_rows:
         info = json.loads(out)
         if not info.get("target_name") or not info.get("jit_free"):
             raise SystemExit(f"matrix audit failed: invalid Rust target info for {ver}/{backend}/{pal}: {info}")
+        if (backend, pal) == ("emulate", "darwin"):
+            if info["target_name"] != "aarch64-apple-ios-sim":
+                raise SystemExit(f"matrix audit failed: expected aarch64-apple-ios-sim default for emulate/darwin, got {info['target_name']}")
+            out_ios = subprocess.check_output(
+                [
+                    sys.executable,
+                    "-I",
+                    str(obsd_rust),
+                    "target-info",
+                    "--openbsd-version",
+                    ver,
+                    "--backend",
+                    "emulate",
+                    "--pal",
+                    "darwin",
+                    "--sdk",
+                    "iphoneos",
+                ],
+                text=True,
+            )
+            if json.loads(out_ios)["target_name"] != "aarch64-apple-ios":
+                raise SystemExit("matrix audit failed: expected aarch64-apple-ios for emulate/darwin --sdk iphoneos")
+        elif (backend, pal) == ("translate", "darwin"):
+            if info["target_name"] != "aarch64-apple-darwin":
+                raise SystemExit(f"matrix audit failed: expected aarch64-apple-darwin for translate/darwin, got {info['target_name']}")
         lane_count += 1
 
 print(
     f"matrix seams audit: ok ({len(ver_rows)} releases x {len(mat_rows)} backend/PAL cells = {lane_count} lanes verified)"
 )
 PY_EOF
+
+python3 -I "$repo_root/tools/config/obsd_versions.py" check

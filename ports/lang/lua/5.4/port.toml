@@ -2,9 +2,9 @@ port = "lang/lua/5.4"
 build_style = "make"
 use_gmake = true
 
-# Build static liblua5.4.a + lua54 + luac54 cleanly on OpenBSD BSD profile
+# Build static liblua5.4.a + lua54 + luac54 cleanly on OpenBSD POSIX profile (without dlopen)
 build_cmd = [
-    "gmake -C src -j\"$JOBS\" liblua5.4.a lua54 luac54 CC=\"$CC\" AR=\"$AR rcu\" RANLIB=\"$RANLIB\" SYSCFLAGS=\"-DLUA_USE_BSD\" SYSLIBS=\"-ledit -lcurses\" MYLDFLAGS=\"-lm\"",
+    "gmake -C src -j\"$JOBS\" liblua5.4.a lua54 luac54 CC=\"$CC\" AR=\"$AR rcu\" RANLIB=\"$RANLIB\" SYSCFLAGS=\"-DLUA_USE_POSIX\" SYSLIBS=\"-ledit -lcurses\" MYLDFLAGS=\"-lm\"",
 ]
 
 install_cmd = [

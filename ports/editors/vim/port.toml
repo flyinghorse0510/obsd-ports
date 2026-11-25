@@ -50,8 +50,11 @@ post_install = [
 
 [env]
 ac_cv_lib_elf_main = "no"
+ac_cv_func_dlopen = "no"
+ac_cv_lib_dl_dlopen = "no"
+ac_cv_header_dlfcn_h = "no"
 vim_cv_uname_output = "OpenBSD"
-vim_cv_uname_m_output = "wasm64"
+vim_cv_uname_m_output = "${OBSD_GUEST_ARCH}"
 vim_cv_ipv4_networking = "yes"
 vim_cv_ipv6_networking = "yes"
 vim_cv_toupper_broken = "no"

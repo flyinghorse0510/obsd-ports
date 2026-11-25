@@ -1,4 +1,5 @@
 port = "audio/whisper.cpp"
+only_for_pals = ["emscripten"]
 depends = ["devel/libggml"]
 build_style = "cmake"
 separate_build = true

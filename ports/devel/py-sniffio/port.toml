@@ -1,4 +1,5 @@
 port = "devel/py-sniffio"
+only_for_pals = ["emscripten"]
 only_versions = ["8.0"]
 depends = ["lang/python/3"]
 build_style = "script"

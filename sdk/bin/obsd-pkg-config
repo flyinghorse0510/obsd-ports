@@ -1,2 +1,4 @@
 #!/bin/sh
-exec python3 -I "$(dirname "$0")/../lib/obsd_toolchain.py" pkg-config "$@"
+_obsd_sdk_bin=$(dirname "$0")
+. "$_obsd_sdk_bin/../lib/obsd-python.sh"
+exec "$OBSD_PYTHON" -I "$_obsd_sdk_bin/../lib/obsd_toolchain.py" pkg-config "$@"

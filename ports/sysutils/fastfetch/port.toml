@@ -7,8 +7,10 @@ pre_configure = [
     "python3 -I \"$PORT_DIR/patch_cmake.py\" \"$WRKSRC\"",
 ]
 
+cflags = ["-DFF_DISABLE_DLOPEN=1"]
+
 cmake_args = [
-    "-DBINARY_LINK_TYPE=dynamic",
+    "-DBINARY_LINK_TYPE=static",
     "-DBUILD_FLASHFETCH=OFF",
     "-DBUILD_TESTS=OFF",
     "-DSET_TWEAK=OFF",

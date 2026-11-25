@@ -3,7 +3,7 @@ build_style = "cargo"
 
 only_for_versions = ["7.8", "7.9", "8.0"]
 only_for_backends = ["emulate", "translate"]
-only_for_pals = ["emscripten", "wasi", "darwin", "ios", "linux"]
+only_for_pals = ["emscripten"]
 
 cargo_packages = ["forge_main"]
 cargo_bins = ["forge"]
@@ -42,9 +42,6 @@ applets = []
 [pals.emscripten]
 env = { OBSD_FORGECODE_PAL = "emscripten", OBSD_FORGECODE_JIT_FREE = "1" }
 
-[pals.ios]
-env = { OBSD_FORGECODE_PAL = "ios", OBSD_FORGECODE_JIT_FREE = "1" }
-
 [pals.darwin]
 env = { OBSD_FORGECODE_PAL = "darwin", OBSD_FORGECODE_JIT_FREE = "1" }
 
@@ -57,5 +54,5 @@ env = { OBSD_FORGECODE_PAL = "linux", OBSD_FORGECODE_JIT_FREE = "1" }
 [targets."emulate/emscripten"]
 env = { OBSD_FORGECODE_TARGET = "emulate/emscripten", TOKIO_WORKER_THREADS = "4" }
 
-[targets."emulate/ios"]
-env = { OBSD_FORGECODE_TARGET = "emulate/ios", OBSD_STRICT_WX_NO_JIT = "1" }
+[targets."emulate/darwin"]
+env = { OBSD_FORGECODE_TARGET = "emulate/darwin", OBSD_STRICT_WX_NO_JIT = "1" }

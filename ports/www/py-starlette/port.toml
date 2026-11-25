@@ -1,4 +1,5 @@
 port = "www/py-starlette"
+only_for_pals = ["emscripten"]
 only_versions = ["8.0"]
 depends = ["lang/python/3", "net/py-anyio"]
 build_style = "script"

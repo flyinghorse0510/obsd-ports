@@ -1,4 +1,5 @@
 port = "textproc/py-markdown-it"
+only_for_pals = ["emscripten"]
 depends = ["lang/python/3", "textproc/py-mdurl"]
 build_style = "script"
 

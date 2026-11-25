@@ -2,7 +2,7 @@
 
 Each ported package lives either at `ports/<portpath>/port.toml` (backed by immutable `vendor/openbsd/versions/$(OPENBSD_VERSION)/ports/<vendor_port>/`) or as a self-contained OpenBSD-style port under `extra/<portpath>/` (`Makefile`, optional `crates.inc`, `distinfo`, `pkg/DESCR`, `pkg/PLIST`, optional `patches/patch-*`, and `port.toml`, indexed in `config/extra/index.tsv`).
 
-A single `port.toml` parameterizes cleanly across all **21 lanes** (`OPENBSD_VERSION ∈ {7.8, 7.9, 8.0}` x 7 `(COMPAT_BACKEND, COMPAT_PAL)` cells: `emulate/{emscripten,wasi,darwin,ios}` and `translate/{darwin,ios,linux}`).
+A single `port.toml` parameterizes cleanly across all **15 canonical matrix cells** (`OPENBSD_VERSION ∈ {7.8, 7.9, 8.0}` x 5 `(COMPAT_BACKEND, COMPAT_PAL)` cells: `emulate/{emscripten,wasi,darwin}` and `translate/{darwin,linux}`).
 
 ## Schema Reference
 
@@ -22,7 +22,7 @@ use_gmake = true
 # Optional 3D matrix eligibility gates (`only_versions` kept as alias for `only_for_versions`)
 # only_for_versions = ["7.8", "7.9", "8.0"]
 # only_for_backends = ["emulate", "translate"]
-# only_for_pals = ["emscripten", "wasi", "darwin", "ios", "linux"]
+# only_for_pals = ["emscripten", "wasi", "darwin", "linux"]
 # only_for_targets = ["emulate/emscripten"]
 # not_for_versions = []
 # not_for_backends = []
@@ -82,7 +82,7 @@ entry = "auto"                 # auto-detects __main_argc_argv, main, or obsd_to
 # [targets."<backend>/<pal>"] -> [matrix."<ver>/<backend>/<pal>"], shallow-merging `env`):
 # [versions."7.8"]
 # skip_vendor_patches = ["patch-foo"]
-# [pals.ios]
+# [pals.darwin]
 # cargo_features = ["portable-default"]
 ```
 

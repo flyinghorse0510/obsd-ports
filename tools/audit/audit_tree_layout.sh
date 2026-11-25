@@ -20,15 +20,11 @@ required_dirs=(
 	sdk/rust
 	sdk/autoconf
 	sdk/cmake
-	vendor/openbsd/versions/7.8/ports
-	vendor/openbsd/versions/7.9/ports
-	vendor/openbsd/versions/8.0/ports
+	targets/common
 	targets/emulate/emscripten
 	targets/emulate/darwin
-	targets/emulate/ios
 	targets/emulate/wasi
 	targets/translate/darwin
-	targets/translate/ios
 	targets/translate/linux
 	tools/vendor
 	tools/extra
@@ -37,6 +33,12 @@ required_dirs=(
 	tools/testing
 	docs
 )
+
+# Per-release dirs/files come from config/versions/index.tsv (never hardcoded).
+while IFS= read -r rel; do
+	[ -n "$rel" ] || continue
+	required_dirs+=("vendor/openbsd/versions/$rel/ports")
+done < <(python3 -I tools/config/obsd_versions.py list)
 
 for d in "${required_dirs[@]}"; do
 	if [ ! -d "$d" ]; then
@@ -50,14 +52,8 @@ required_files=(
 	.gitignore
 	README.md
 	config/versions/index.tsv
-	config/versions/7.8.mk
-	config/versions/7.9.mk
-	config/versions/8.0.mk
-	config/versions/7.8-catalog.tsv
-	config/versions/7.9-catalog.tsv
-	config/versions/8.0-catalog.tsv
 	config/matrix/index.tsv
-	config/matrix/pals/ios.mk
+	config/matrix/pals/darwin.mk
 	config/extra/index.tsv
 	sdk/bin/obsd-cc
 	sdk/bin/obsd-c++
@@ -69,19 +65,32 @@ required_files=(
 	sdk/bin/obsd-pkg-config
 	sdk/bin/obsd-cargo
 	sdk/bin/obsd-rust-ld
+	sdk/lib/obsd-python.sh
 	sdk/rust/wasm64-unknown-openbsd.json
 	sdk/rust/obsd_rust.py
 	sdk/rust/unwind_stub.c
 	sdk/autoconf/config.site
+	sdk/autoconf/config.site.darwin
 	sdk/cmake/openbsd-wasm64.cmake
+	sdk/cmake/openbsd-darwin.cmake
 	tools/build_ports.py
+	tools/config/obsd_versions.py
+	tools/config/obsd_env.py
 	tools/extra/gen_cargo_distinfo.py
 	tools/audit/audit_extra_ports.py
 	tools/vendor/sync_openbsd_ports.py
 	tools/vendor/import_port.py
 	tools/audit/vendor-baseline.tsv
+	targets/common/packaging.py
 	targets/emulate/emscripten/package_wasm.py
+	targets/emulate/darwin/package_darwin.py
+	targets/translate/darwin/package_darwin.py
 )
+
+while IFS= read -r rel; do
+	[ -n "$rel" ] || continue
+	required_files+=("config/versions/$rel.mk" "config/versions/$rel-catalog.tsv")
+done < <(python3 -I tools/config/obsd_versions.py list)
 
 for f in "${required_files[@]}"; do
 	if [ ! -f "$f" ]; then

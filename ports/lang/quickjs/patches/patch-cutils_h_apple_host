@@ -1,0 +1,17 @@
+macOS host build of ./host-qjsc lacks <endian.h>; use <machine/endian.h> on __APPLE__.
+
+Index: cutils.h
+--- cutils.h.orig
++++ cutils.h
+@@ -28,7 +28,11 @@
+ #include <stdlib.h>
+ #include <inttypes.h>
+ 
++#ifdef __APPLE__
++#include <machine/endian.h>
++#else
+ #include <endian.h>
++#endif
+ 
+ #if BYTE_ORDER == BIG_ENDIAN
+ #define WORDS_BIGENDIAN

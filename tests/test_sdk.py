@@ -27,6 +27,8 @@ import zlib
 from typing import List
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "tools/config"))
+import obsd_versions  # noqa: E402  (release axis from config/versions/index.tsv)
 if str(REPO_ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "tools"))
 if str(REPO_ROOT / "targets/emulate/emscripten") not in sys.path:
@@ -632,6 +634,98 @@ def test_only_versions_and_skip_distfiles(obsd_root: pathlib.Path) -> None:
     print("[SDK-TEST] only_versions + skip_distfiles + CMAKE_SYSTEM_PROCESSOR override: PASS")
 
 
+def test_matrix_and_package_desc_emission() -> None:
+    import json
+
+    obsd_cargo = REPO_ROOT / "sdk/bin/obsd-cargo"
+    expected_5_cells = {
+        ("emulate", "emscripten"),
+        ("emulate", "wasi"),
+        ("emulate", "darwin"),
+        ("translate", "darwin"),
+        ("translate", "linux"),
+    }
+    seen_cells = set()
+    for raw in (REPO_ROOT / "config/matrix/index.tsv").read_text(encoding="utf-8").splitlines():
+        s = raw.strip()
+        if not s or s.startswith("#") or s.startswith("backend\t"):
+            continue
+        cols = raw.split("\t")
+        seen_cells.add((cols[0].strip(), cols[1].strip()))
+    assert seen_cells == expected_5_cells, f"expected 5-cell matrix {expected_5_cells}, got {seen_cells}"
+
+    for sdk_arg, exp_triple in (
+        ("iphonesimulator", "aarch64-apple-ios-sim"),
+        ("iphoneos", "aarch64-apple-ios"),
+    ):
+        out = subprocess.check_output(
+            [
+                str(obsd_cargo),
+                "target-info",
+                "--openbsd-version",
+                "8.0",
+                "--backend",
+                "emulate",
+                "--pal",
+                "darwin",
+                "--sdk",
+                sdk_arg,
+            ],
+            text=True,
+        )
+        assert json.loads(out)["target_name"] == exp_triple
+    out_tr = subprocess.check_output(
+        [
+            str(obsd_cargo),
+            "target-info",
+            "--openbsd-version",
+            "8.0",
+            "--backend",
+            "translate",
+            "--pal",
+            "darwin",
+        ],
+        text=True,
+    )
+    assert json.loads(out_tr)["target_name"] == "aarch64-apple-darwin"
+
+    # Verify Darwin recipes discover cleanly (53 C/C++ ports) while Emscripten discovers full 80
+    darwin_recs = bp.discover_recipes("8.0", backend="emulate", pal="darwin", section="all")
+    wasm_recs = bp.discover_recipes("8.0", backend="emulate", pal="emscripten", section="all")
+    assert len(darwin_recs) == 53, f"expected 53 Darwin ports, got {len(darwin_recs)}"
+    assert len(wasm_recs) == 80, f"expected 80 WASM ports, got {len(wasm_recs)}"
+
+    # Verify emit_port_packages writes both +CONTENTS and +DESC into <pkgname>.tgz
+    with tempfile.TemporaryDirectory(prefix="obsd-test-pkgdesc-") as td:
+        tp = pathlib.Path(td)
+        lane_dir = tp / "lane"
+        stage_dir = lane_dir / "stage"
+        (stage_dir / "usr/local/bin").mkdir(parents=True)
+        (stage_dir / "usr/local/bin/demo").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        cnt = pw.emit_port_packages(
+            lane_dir=lane_dir,
+            stage_dir=stage_dir,
+            records=[
+                {
+                    "port": "devel/demo",
+                    "pkgname": "demo-1.0",
+                    "openbsd_version": "8.0",
+                    "comment": "demo CLI tool",
+                    "descr": "Full multi-line description of demo.",
+                    "installed_files": ["usr/local/bin/demo"],
+                }
+            ],
+        )
+        assert cnt == 1
+        with tarfile.open(lane_dir / "packages/demo-1.0.tgz", "r:gz") as tf:
+            names = tf.getnames()
+            assert "+CONTENTS" in names and "+DESC" in names, names
+            desc_body = tf.extractfile("+DESC").read().decode("utf-8")  # type: ignore[union-attr]
+            assert desc_body == "demo CLI tool\nFull multi-line description of demo.\n", desc_body
+
+    print("[SDK-TEST] canonical 5-cell matrix + Darwin COMPAT_SDK target-info + package +DESC emission: PASS")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--openbsd-version", default=os.environ.get("OPENBSD_VERSION", "all"))
@@ -640,10 +734,11 @@ def main() -> int:
 
     obsd_root = resolve_obsd_root(args.libobsdcompat_root)
     target = args.openbsd_version.strip()
-    versions: List[str] = ["7.8", "7.9", "8.0"] if target in ("", "all") else [v.strip() for v in target.split(",") if v.strip()]
+    versions: List[str] = obsd_versions.resolve_versions(target)
 
     test_lzip_extraction()
     test_only_versions_and_skip_distfiles(obsd_root)
+    test_matrix_and_package_desc_emission()
     for ver in versions:
         test_symlink_alias_discovery(ver, obsd_root)
         test_cxx17_build_localize_and_run(ver, obsd_root)

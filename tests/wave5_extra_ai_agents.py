@@ -3,8 +3,8 @@
 tests/wave5_extra_ai_agents.py -- Tri-Release (OpenBSD 7.8 + 7.9 + 8.0) WASM64
 End-to-End Verification Suite for Wave-5 (`obsd-ports/extra/` + 3D Matrix +
 100% JIT-Free Rust AI Agents):
-  1. 3D Matrix Override Unit & Integration Checks across all 21 lanes
-     (`(7.8, 7.9, 8.0) x (emulate, translate) x (emscripten, wasi, darwin, ios, linux)`),
+  1. 3D Matrix Override Unit & Integration Checks across all 15 canonical lanes
+     (`(7.8, 7.9, 8.0) x (emulate/{emscripten,wasi,darwin}, translate/{darwin,linux})`),
      `make list-extra`, `audit_extra_ports.py`, `obsd-cargo target-info`, and
      JIT-free symbol audit (`0` `wasmtime`/`cranelift`/`v8`/`deno`/`luajit`/`pcre2_jit`
      symbols in `goose.o`, `forge.o`, `aichat.o`).
@@ -101,9 +101,7 @@ VALID_MATRIX_CELLS: Tuple[Tuple[str, str], ...] = (
     ("emulate", "emscripten"),
     ("emulate", "wasi"),
     ("emulate", "darwin"),
-    ("emulate", "ios"),
     ("translate", "darwin"),
-    ("translate", "ios"),
     ("translate", "linux"),
 )
 
@@ -736,7 +734,7 @@ def parse_svfs_paths(svfs_gz: pathlib.Path) -> Set[str]:
 
 def verify_3d_matrix_unit_and_integration() -> None:
     """Verify 6-layer 3D matrix override precedence, eligibility gates, `obsd-cargo target-info`,
-    and all 21 `(OPENBSD_VERSION x COMPAT_BACKEND x COMPAT_PAL)` lanes."""
+    and all 15 `(OPENBSD_VERSION x COMPAT_BACKEND x COMPAT_PAL)` canonical matrix lanes."""
     with tempfile.TemporaryDirectory(prefix="wave5-matrix-unit-") as td:
         tp = pathlib.Path(td)
         pdir = tp / "devel/synth"
@@ -766,47 +764,47 @@ binary = "/usr/local/bin/synth"
 applets = []
 env = { L3 = "translate", OVER = "translate" }
 
-[pals.ios]
-cflags_append = ["-DIOS=1"]
-env = { L4 = "ios", OVER = "ios" }
+[pals.darwin]
+cflags_append = ["-DDARWIN=1"]
+env = { L4 = "darwin", OVER = "darwin" }
 
-[targets."emulate/ios"]
-cflags_append = ["-DEMU_IOS=1"]
-env = { L5 = "emulate_ios", OVER = "emulate_ios" }
+[targets."emulate/darwin"]
+cflags_append = ["-DEMU_DARWIN=1"]
+env = { L5 = "emulate_darwin", OVER = "emulate_darwin" }
 
-[matrix."8.0/emulate/ios"]
-cflags_append = ["-DMATRIX_80_EMU_IOS=1"]
-env = { L6 = "8.0_emulate_ios", OVER = "matrix_top" }
+[matrix."8.0/emulate/darwin"]
+cflags_append = ["-DMATRIX_80_EMU_DARWIN=1"]
+env = { L6 = "8.0_emulate_darwin", OVER = "matrix_top" }
 """.strip()
             + "\n",
             encoding="utf-8",
         )
 
-        rec_top = bp.load_recipe(pdir, "8.0", ports_root=tp, backend="emulate", pal="ios", section="extra")
-        ok_top, _ = bp.recipe_supports_lane(rec_top, "8.0", backend="emulate", pal="ios")
+        rec_top = bp.load_recipe(pdir, "8.0", ports_root=tp, backend="emulate", pal="darwin", section="extra")
+        ok_top, _ = bp.recipe_supports_lane(rec_top, "8.0", backend="emulate", pal="darwin")
         assert ok_top
         assert rec_top["cflags"] == [
             "-DBASE=1",
             "-DVER80=1",
             "-DEMULATE=1",
-            "-DIOS=1",
-            "-DEMU_IOS=1",
-            "-DMATRIX_80_EMU_IOS=1",
+            "-DDARWIN=1",
+            "-DEMU_DARWIN=1",
+            "-DMATRIX_80_EMU_DARWIN=1",
         ]
         assert rec_top["env"] == {
             "L1": "base",
             "L2": "ver80",
             "L3": "emulate",
-            "L4": "ios",
-            "L5": "emulate_ios",
-            "L6": "8.0_emulate_ios",
+            "L4": "darwin",
+            "L5": "emulate_darwin",
+            "L6": "8.0_emulate_darwin",
             "OVER": "matrix_top",
         }
         assert len(rec_top["applets"]) == 1 and rec_top["applets"][0]["sym"] == "synth"
 
-        rec_tr = bp.load_recipe(pdir, "8.0", ports_root=tp, backend="translate", pal="ios", section="extra")
-        assert bp.recipe_supports_lane(rec_tr, "8.0", backend="translate", pal="ios")[0]
-        assert rec_tr["applets"] == [] and rec_tr["env"]["OVER"] == "ios"
+        rec_tr = bp.load_recipe(pdir, "8.0", ports_root=tp, backend="translate", pal="darwin", section="extra")
+        assert bp.recipe_supports_lane(rec_tr, "8.0", backend="translate", pal="darwin")[0]
+        assert rec_tr["applets"] == [] and rec_tr["env"]["OVER"] == "darwin"
 
         rec_78 = bp.load_recipe(pdir, "7.8", ports_root=tp, backend="emulate", pal="emscripten", section="extra")
         assert not bp.recipe_supports_lane(rec_78, "7.8", backend="emulate", pal="emscripten")[0]
@@ -822,6 +820,20 @@ env = { L6 = "8.0_emulate_ios", OVER = "matrix_top" }
     for ver in VALID_VERSIONS:
         for backend, pal in VALID_MATRIX_CELLS:
             lane_count += 1
+            for extra_port in ("devel/forgecode", "devel/goose", "misc/aichat"):
+                r_loaded = bp.load_recipe(
+                    REPO_ROOT / "extra" / extra_port,
+                    ver,
+                    ports_root=REPO_ROOT / "extra",
+                    backend=backend,
+                    pal=pal,
+                    section="extra",
+                )
+                if backend == "emulate":
+                    assert len(r_loaded["applets"]) == 1, f"[{ver} {backend}/{pal}] expected 1 applet for {extra_port}"
+                else:
+                    assert r_loaded["applets"] == [], f"[{ver} {backend}/{pal}] expected 0 applets on translate for {extra_port}"
+
             extra_recs = bp.discover_recipes(
                 ver,
                 backend=backend,
@@ -829,20 +841,17 @@ env = { L6 = "8.0_emulate_ios", OVER = "matrix_top" }
                 section="extra",
                 include_cross_section_deps=False,
             )
-            found_ports = [r["port"] for r in extra_recs]
-            assert found_ports == ["devel/forgecode", "devel/goose", "misc/aichat"], (
-                f"[{ver} {backend}/{pal}] unexpected extra recipes: {found_ports}"
-            )
-            for r in extra_recs:
-                if backend == "emulate":
-                    assert len(r["applets"]) == 1, f"[{ver} {backend}/{pal}] expected 1 applet for {r['port']}"
-                else:
-                    assert r["applets"] == [], f"[{ver} {backend}/{pal}] expected 0 applets on translate for {r['port']}"
-
             all_recs = bp.discover_recipes(ver, backend=backend, pal=pal, section="all")
-            assert len(all_recs) == EXPECTED_TOTAL_PORTS[ver], (
-                f"[{ver} {backend}/{pal}] expected {EXPECTED_TOTAL_PORTS[ver]} total recipes, got {len(all_recs)}"
-            )
+            if (backend, pal) == ("emulate", "emscripten"):
+                found_ports = [r["port"] for r in extra_recs]
+                assert found_ports == ["devel/forgecode", "devel/goose", "misc/aichat"], (
+                    f"[{ver} {backend}/{pal}] unexpected extra recipes: {found_ports}"
+                )
+                assert len(all_recs) == EXPECTED_TOTAL_PORTS[ver], (
+                    f"[{ver} {backend}/{pal}] expected {EXPECTED_TOTAL_PORTS[ver]} total recipes, got {len(all_recs)}"
+                )
+            elif pal == "darwin":
+                assert len(all_recs) == 53, f"[{ver} {backend}/darwin] expected 53 Darwin ports, got {len(all_recs)}"
 
             tinfo = json.loads(
                 subprocess.check_output(
@@ -862,10 +871,12 @@ env = { L6 = "8.0_emulate_ios", OVER = "matrix_top" }
             assert tinfo["openbsd_version"] == ver and tinfo["backend"] == backend and tinfo["pal"] == pal
             if (backend, pal) == ("emulate", "emscripten"):
                 assert tinfo["target_name"] == "wasm64-unknown-openbsd"
-            elif pal == "ios":
-                assert "ios" in tinfo["target_name"]
+            elif (backend, pal) == ("emulate", "darwin"):
+                assert tinfo["target_name"] == "aarch64-apple-ios-sim"
+            elif (backend, pal) == ("translate", "darwin"):
+                assert tinfo["target_name"] == "aarch64-apple-darwin"
 
-    assert lane_count == 21
+    assert lane_count == 15
     subprocess.run([sys.executable, "-I", str(REPO_ROOT / "tools/audit/audit_extra_ports.py")], check=True)
 
     # Verify `.data.rel.ro` / `.data.rel.ro.*` -> `.rodata.rel.ro` / `.rodata.rel.ro.*` promotion
@@ -930,7 +941,7 @@ env = { L6 = "8.0_emulate_ios", OVER = "matrix_top" }
             check=True,
         )
 
-    print("[WAVE5-MATRIX-OK] 6-layer override unit checks, .rodata.rel.ro promotion, audit_extra_ports.py, and all 21 3D matrix lanes verified")
+    print("[WAVE5-MATRIX-OK] 6-layer override unit checks, .rodata.rel.ro promotion, audit_extra_ports.py, and all 15 3D matrix lanes verified")
 
 
 def verify_host_packaging_and_jit_free(
