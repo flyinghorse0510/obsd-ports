@@ -1,0 +1,84 @@
+port = "games/ace"
+only_for_targets = ["emulate/emscripten"]
+depends = ["graphics/png"]
+build_style = "gnu"
+use_gmake = true
+
+cppflags = [
+    "-I/usr/X11R6/include",
+]
+
+ldflags = [
+    "-L/usr/X11R6/lib",
+]
+
+configure_args = [
+    "--x-includes=/usr/X11R6/include",
+    "--x-libraries=/usr/X11R6/lib",
+]
+
+post_configure = [
+    "host_png_cflags=$(/usr/bin/pkg-config --cflags libpng 2>/dev/null || true); sed -i.bak \"s|\\$(BUILD_CC) \\$(CFLAGS) \\$(CPPFLAGS) \\$(LDFLAGS)|\\$(BUILD_CC) -O2 $host_png_cflags|g\" \"$WRKBUILD/lib/Makefile\" && rm -f \"$WRKBUILD/lib/Makefile.bak\"",
+]
+
+post_install = [
+    "rm -f \"$WRKBUILD/lib/make-imglib\" \"$WRKBUILD/lib/make-imglib.o\" \"$WRKBUILD/lib/text2c\" \"$WRKBUILD/lib/text2c.o\"",
+]
+
+[env]
+BUILD_CC = "clang"
+
+[[applets]]
+sym = "freecell"
+binary = "/usr/local/bin/freecell"
+paths = ["/usr/local/bin/freecell"]
+
+[[applets]]
+sym = "solitaire"
+binary = "/usr/local/bin/solitaire"
+paths = ["/usr/local/bin/solitaire"]
+
+[[applets]]
+sym = "spider"
+binary = "/usr/local/bin/spider"
+paths = ["/usr/local/bin/spider"]
+
+[[applets]]
+sym = "canfield"
+binary = "/usr/local/bin/canfield"
+paths = ["/usr/local/bin/canfield"]
+
+[[applets]]
+sym = "golf"
+binary = "/usr/local/bin/golf"
+paths = ["/usr/local/bin/golf"]
+
+[[applets]]
+sym = "minesweeper"
+binary = "/usr/local/bin/minesweeper"
+paths = ["/usr/local/bin/minesweeper"]
+
+[[applets]]
+sym = "taipei"
+binary = "/usr/local/bin/taipei"
+paths = ["/usr/local/bin/taipei"]
+
+[[applets]]
+sym = "mastermind"
+binary = "/usr/local/bin/mastermind"
+paths = ["/usr/local/bin/mastermind"]
+
+[[applets]]
+sym = "merlin"
+binary = "/usr/local/bin/merlin"
+paths = ["/usr/local/bin/merlin"]
+
+[[applets]]
+sym = "pegged"
+binary = "/usr/local/bin/pegged"
+paths = ["/usr/local/bin/pegged"]
+
+[[applets]]
+sym = "penguins"
+binary = "/usr/local/bin/penguins"
+paths = ["/usr/local/bin/penguins"]

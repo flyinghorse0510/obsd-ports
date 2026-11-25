@@ -89,7 +89,9 @@ WASM_BOUNDARY_IMPORTS: Set[str] = {
     "__obsd_wasm_longjmp",
     "__obsd_guest_tcb",
     "__obsd_guest_tcb_set",
+    "__emutls_get_address",
     "__sanitizer_cov_trace_pc",
+    "__sanitizer_cov_trace_pc_guard",
     "__stack_pointer",
     "__indirect_function_table",
     "__linear_memory",
@@ -613,6 +615,23 @@ def ensure_cxx_config_dir(cache_dir: pathlib.Path, openbsd_version: str) -> path
 # ============================================================================
 
 
+def resolve_active_x11_build_dir(openbsd_version: str, backend: str, pal: str) -> Optional[pathlib.Path]:
+    if backend != "emulate" or pal != "emscripten":
+        return None
+    raw = os.environ.get("OBSD_X11_BUILD_DIR", "").strip() or os.environ.get("XENOCARA_BUILD_DIR", "").strip()
+    if raw.lower() in ("none", "off", "0", "false"):
+        return None
+    if raw:
+        p = pathlib.Path(raw).resolve()
+        if not (p / "libobsdx11-libs.json").is_file():
+            die(f"OBSD_X11_BUILD_DIR={p} is missing libobsdx11-libs.json")
+        return p
+    default_p = pathlib.Path("/var/tmp/sonvori-xenocara/build") / openbsd_version
+    if (default_p / "libobsdx11-libs.json").is_file():
+        return default_p.resolve()
+    return None
+
+
 class EmscriptenToolchain:
     def __init__(self) -> None:
         self.openbsd_version = obsd_versions.env_or_default_version()
@@ -635,6 +654,19 @@ class EmscriptenToolchain:
         self.wasm_build_dir = self.obsd_root / f"build/wasm-{self.openbsd_version}"
         self.include_root = self.wasm_build_dir / f"include-root-{self.openbsd_version}"
         self.base_archive = self.wasm_build_dir / f"libobsdc-wasm-{self.openbsd_version}.a"
+
+        self.x11_build_dir = resolve_active_x11_build_dir(self.openbsd_version, self.backend, self.pal)
+        self.x11_sdk_usr = (self.x11_build_dir / "sdk/usr/X11R6") if self.x11_build_dir is not None else None
+        self.x11_archive = (
+            (self.x11_build_dir / f"libobsdx11-wasm-{self.openbsd_version}.a")
+            if self.x11_build_dir is not None
+            else None
+        )
+        self.shared_x11_libs: Set[str] = (
+            set(json.loads((self.x11_build_dir / "libobsdx11-libs.json").read_text(encoding="utf-8")))
+            if self.x11_build_dir is not None
+            else set()
+        )
 
         emsdk_root = self.obsd_root / "deps/emsdk"
         em_dir = emsdk_root / "upstream/emscripten"
@@ -667,6 +699,11 @@ class EmscriptenToolchain:
             die(f"missing base OpenBSD WASM archive: {self.base_archive}")
         st = self.base_archive.stat()
         sig = f"{self.base_archive}:{st.st_size}:{st.st_mtime_ns}"
+        if self.x11_archive is not None:
+            if not self.x11_archive.is_file():
+                die(f"missing Xenocara X11 WASM archive: {self.x11_archive}")
+            xst = self.x11_archive.stat()
+            sig += f"|x11:{self.x11_archive}:{xst.st_size}:{xst.st_mtime_ns}"
         key = hashlib.sha1(sig.encode()).hexdigest()[:16]
         cache_file = self.cache_dir / f"allowed-undefs-{self.openbsd_version}-{key}.json"
         if cache_file.is_file():
@@ -682,6 +719,17 @@ class EmscriptenToolchain:
             ps = ln.split()
             if len(ps) >= 3 and not ln.endswith(":"):
                 allowed.add(ps[-1])
+
+        if self.x11_archive is not None:
+            x11_out = subprocess.check_output(
+                [str(self.llvm_nm), "--defined-only", "-g", str(self.x11_archive)],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            )
+            for ln in x11_out.splitlines():
+                ps = ln.split()
+                if len(ps) >= 3 and not ln.endswith(":"):
+                    allowed.add(ps[-1])
 
         for rt_cand in (
             self.em_sysroot / "lib/wasm64-emscripten/libclang_rt.builtins-mt.a",
@@ -718,6 +766,10 @@ class EmscriptenToolchain:
             sub = norm[len("/usr/local/include") :].lstrip("/")
             base = self.stage_dir / "usr/local/include"
             return str(base / sub) if sub else str(base)
+        if self.x11_sdk_usr is not None and (norm == "/usr/X11R6/include" or norm.startswith("/usr/X11R6/include/")):
+            sub = norm[len("/usr/X11R6/include") :].lstrip("/")
+            base = self.x11_sdk_usr / "include"
+            return str(base / sub) if sub else str(base)
         return path_str
 
     def remap_lib_dir(self, path_str: str) -> Optional[str]:
@@ -731,7 +783,34 @@ class EmscriptenToolchain:
             sub = norm[len("/usr/local/lib") :].lstrip("/")
             base = self.stage_dir / "usr/local/lib"
             return str(base / sub) if sub else str(base)
+        if self.x11_sdk_usr is not None and (norm == "/usr/X11R6/lib" or norm.startswith("/usr/X11R6/lib/")):
+            sub = norm[len("/usr/X11R6/lib") :].lstrip("/")
+            base = self.x11_sdk_usr / "lib"
+            return str(base / sub) if sub else str(base)
         return path_str
+
+    def is_shared_x11_archive_path(self, path_str: str) -> bool:
+        if not self.shared_x11_libs or not path_str.endswith(".a"):
+            return False
+        bn = os.path.basename(path_str)
+        if not (bn.startswith("lib") and len(bn) > 5):
+            return False
+        stem = bn[3:-2]
+        if stem not in self.shared_x11_libs:
+            return False
+        norm = os.path.normpath(path_str)
+        if norm.startswith("/usr/X11R6/lib/"):
+            return True
+        try:
+            rp = pathlib.Path(norm).resolve()
+        except OSError:
+            return False
+        if self.x11_build_dir is not None and rp.is_relative_to(self.x11_build_dir):
+            return True
+        stage_lib = (self.stage_dir / "usr/local/lib").resolve()
+        if rp.is_relative_to(stage_lib):
+            return True
+        return False
 
 
 # Backwards-compatibility alias
@@ -1074,6 +1153,11 @@ def build_guest_compile_flags(
     if stage_inc.is_dir():
         suffix_flags.extend(["-isystem", str(stage_inc)])
 
+    if ctx.x11_sdk_usr is not None:
+        x11_inc = ctx.x11_sdk_usr / "include"
+        if x11_inc.is_dir():
+            suffix_flags.extend(["-isystem", str(x11_inc)])
+
     suffix_flags.extend(
         [
             "-isystem",
@@ -1098,6 +1182,9 @@ def resolve_library(
     lib_dirs: Sequence[str],
     stage_lib_dir: pathlib.Path,
 ) -> Tuple[Optional[str], bool]:
+    if name in ctx.shared_x11_libs:
+        return None, True
+
     search_dirs = list(lib_dirs)
     if stage_lib_dir.is_dir():
         s_str = str(stage_lib_dir)
@@ -1106,6 +1193,8 @@ def resolve_library(
 
     if name.startswith(":"):
         exact = name[1:]
+        if exact.startswith("lib") and exact.endswith(".a") and exact[3:-2] in ctx.shared_x11_libs:
+            return None, True
         for d in search_dirs:
             cand = pathlib.Path(d) / exact
             if cand.is_file():
@@ -1648,6 +1737,8 @@ def run_emscripten_cc_driver(argv: List[str], is_cxx: bool) -> int:
                     wot.lower_emutls_file(tmp_obj)
                 ld_inputs.append(str(tmp_obj))
             elif kind == "obj":
+                if ctx.is_shared_x11_archive_path(val):
+                    continue
                 ld_inputs.append(val)
             elif kind == "lib":
                 resolved_ar, ok = resolve_library(ctx, val, lib_dirs, ctx.stage_dir / "usr/local/lib")
@@ -1664,12 +1755,13 @@ def run_emscripten_cc_driver(argv: List[str], is_cxx: bool) -> int:
             return 1
 
         no_default_cxx = any(f in argv for f in ("-nostdlib", "-nostdlib++", "-nodefaultlibs"))
-        if is_cxx and not no_default_cxx:
+        cxx_shared_in_x11 = "c++" in ctx.shared_x11_libs
+        if is_cxx and not no_default_cxx and not cxx_shared_in_x11:
             libcxx_a, libcxxabi_a = ensure_cxx_runtime(ctx)
             for ar_p in (str(libcxx_a), str(libcxxabi_a)):
                 if ar_p not in ld_inputs:
                     ld_inputs.append(ar_p)
-        elif any(os.path.basename(x).startswith(("libc++.", "libc++-")) for x in ld_inputs):
+        elif not cxx_shared_in_x11 and any(os.path.basename(x).startswith(("libc++.", "libc++-")) for x in ld_inputs):
             _, libcxxabi_a = ensure_cxx_runtime(ctx)
             if str(libcxxabi_a) not in ld_inputs:
                 ld_inputs.append(str(libcxxabi_a))
@@ -3867,12 +3959,22 @@ def run_pkg_config(argv: List[str]) -> int:
     if not host_pc:
         die("host pkg-config executable not found")
     ver, stage_dir, cache_dir = current_stage_and_cache()
+    backend = os.environ.get("COMPAT_BACKEND", "emulate").strip() or "emulate"
+    pal = os.environ.get("COMPAT_PAL", "emscripten").strip() or "emscripten"
+    x11_dir = resolve_active_x11_build_dir(ver, backend, pal)
     base_pc_dir = ensure_base_pkgconfig_dir(cache_dir, ver)
     search_dirs = [
         str(stage_dir / "usr/local/lib/pkgconfig"),
         str(stage_dir / "usr/local/share/pkgconfig"),
-        str(base_pc_dir),
     ]
+    if x11_dir is not None:
+        search_dirs.extend(
+            [
+                str(x11_dir / "sdk/usr/X11R6/lib/pkgconfig"),
+                str(x11_dir / "sdk/usr/X11R6/share/pkgconfig"),
+            ]
+        )
+    search_dirs.append(str(base_pc_dir))
     env = dict(os.environ)
     env.pop("PKG_CONFIG_PATH", None)
     env["PKG_CONFIG_LIBDIR"] = ":".join(search_dirs)

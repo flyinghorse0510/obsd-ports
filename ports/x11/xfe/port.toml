@@ -1,0 +1,88 @@
+port = "x11/xfe"
+only_for_targets = ["emulate/emscripten"]
+depends = ["devel/fox", "converters/libiconv"]
+build_style = "gnu"
+use_gmake = true
+
+pre_configure = [
+    "sed -i.bak -e 's,-O2,,g' -e 's,pkexec --version,false,g' \"$WRKSRC/configure\" && rm -f \"$WRKSRC/configure.bak\"",
+]
+
+pre_build = [
+    "install -d -m 0755 \"$STAGE_DIR/usr/local/share/xfe\"",
+    "for f in xfe xfw xfi xfp xfa; do if [ -f \"$WRKBUILD/${f}.desktop.in\" ] && [ ! -f \"$WRKBUILD/${f}.desktop\" ]; then sed 's/^_//' \"$WRKBUILD/${f}.desktop.in\" > \"$WRKBUILD/${f}.desktop\"; fi; done",
+]
+
+cppflags = [
+    "-Wno-register",
+    "-I/usr/local/include/fox-1.6",
+    "-I/usr/X11R6/include",
+    "-I/usr/X11R6/include/freetype2",
+]
+
+ldflags = [
+    "-L/usr/X11R6/lib",
+    "-Wl,--allow-multiple-definition",
+]
+
+libs = [
+    "-lFOX-1.6",
+    "-lXft",
+    "-lXrandr",
+    "-lXrender",
+    "-lXcursor",
+    "-lXfixes",
+    "-lXext",
+    "-lX11",
+    "-lfreetype",
+    "-lfontconfig",
+    "-lpng16",
+    "-ljpeg",
+    "-ltiff",
+    "-llzma",
+    "-lzstd",
+    "-lbz2",
+    "-liconv",
+    "-lz",
+    "-lm",
+    "-lutil",
+]
+
+configure_args = [
+    "--sysconfdir=/usr/local/etc",
+    "--disable-nls",
+    "--disable-startup-notification",
+    "--x-includes=/usr/X11R6/include",
+    "--x-libraries=/usr/X11R6/lib",
+]
+
+[versions."7.8"]
+cxxflags = ["-std=gnu++14"]
+
+[versions."7.9"]
+cxxflags = ["-std=gnu++14"]
+
+[versions."8.0"]
+applets_append = [
+    { sym = "xfa", binary = "/usr/local/bin/xfa", paths = ["/usr/local/bin/xfa"] },
+]
+
+[[applets]]
+sym = "xfe"
+binary = "/usr/local/bin/xfe"
+paths = ["/usr/local/bin/xfe"]
+
+[[applets]]
+sym = "xfw"
+binary = "/usr/local/bin/xfw"
+paths = ["/usr/local/bin/xfw"]
+
+[[applets]]
+sym = "xfi"
+binary = "/usr/local/bin/xfi"
+paths = ["/usr/local/bin/xfi"]
+
+[[applets]]
+sym = "xfp"
+binary = "/usr/local/bin/xfp"
+paths = ["/usr/local/bin/xfp"]

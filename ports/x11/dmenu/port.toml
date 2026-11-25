@@ -1,0 +1,26 @@
+port = "x11/dmenu"
+only_for_targets = ["emulate/emscripten"]
+depends = ["fonts/terminus-font"]
+build_style = "make"
+use_gmake = false
+
+build_cmd = [
+    "make -j\"$JOBS\" CC=\"$CC\" PREFIX=/usr/local X11INC=/usr/X11R6/include X11LIB=/usr/X11R6/lib",
+]
+
+install_cmd = [
+    "install -d -m 0755 \"$STAGE_DIR/usr/local/bin\" \"$STAGE_DIR/usr/local/man/man1\"",
+    "install -c -m 0755 dmenu stest \"$STAGE_DIR/usr/local/bin/\"",
+    "install -c -m 0755 dmenu_run dmenu_path \"$STAGE_DIR/usr/local/bin/\"",
+    "install -c -m 0444 dmenu.1 stest.1 \"$STAGE_DIR/usr/local/man/man1/\"",
+]
+
+[[applets]]
+sym = "dmenu"
+binary = "/usr/local/bin/dmenu"
+paths = ["/usr/local/bin/dmenu"]
+
+[[applets]]
+sym = "stest"
+binary = "/usr/local/bin/stest"
+paths = ["/usr/local/bin/stest"]

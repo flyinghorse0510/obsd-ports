@@ -1,0 +1,63 @@
+port = "x11/fluxbox"
+only_for_targets = ["emulate/emscripten"]
+depends = ["converters/libiconv"]
+build_style = "gnu"
+use_gmake = true
+
+cxxflags = [
+    "-std=gnu++11",
+    "-include",
+    "new",
+]
+
+cppflags = [
+    "-I/usr/X11R6/include",
+    "-I/usr/X11R6/include/freetype2",
+]
+
+ldflags = [
+    "-L/usr/X11R6/lib",
+]
+
+libs = [
+    "-liconv",
+]
+
+configure_args = [
+    "--sysconfdir=/usr/local/etc",
+    "--disable-imlib2",
+    "--disable-fribidi",
+    "--disable-nls",
+    "--enable-xft",
+    "--enable-xpm",
+    "--enable-xinerama",
+    "--enable-xrandr",
+    "--enable-xrender",
+    "--x-includes=/usr/X11R6/include",
+    "--x-libraries=/usr/X11R6/lib",
+]
+
+[[applets]]
+sym = "fluxbox"
+binary = "/usr/local/bin/fluxbox"
+paths = ["/usr/local/bin/fluxbox"]
+
+[[applets]]
+sym = "fbrun"
+binary = "/usr/local/bin/fbrun"
+paths = ["/usr/local/bin/fbrun"]
+
+[[applets]]
+sym = "fbsetroot"
+binary = "/usr/local/bin/fbsetroot"
+paths = ["/usr/local/bin/fbsetroot"]
+
+[[applets]]
+sym = "fluxbox_remote"
+binary = "/usr/local/bin/fluxbox-remote"
+paths = ["/usr/local/bin/fluxbox-remote"]
+
+[[applets]]
+sym = "fluxbox_update_configs"
+binary = "/usr/local/bin/fluxbox-update_configs"
+paths = ["/usr/local/bin/fluxbox-update_configs"]

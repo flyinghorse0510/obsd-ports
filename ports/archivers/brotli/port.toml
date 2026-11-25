@@ -1,0 +1,20 @@
+port = "archivers/brotli"
+only_for_targets = ["emulate/emscripten"]
+build_style = "cmake"
+separate_build = true
+
+cmake_args = [
+    "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
+    "-DBROTLI_DISABLE_TESTS=ON",
+]
+
+post_install = [
+    "if [ ! -f \"$STAGE_DIR/usr/local/bin/brotli\" ] && [ -f \"$WRKBUILD/brotli\" ]; then mkdir -p \"$STAGE_DIR/usr/local/bin\" \"$STAGE_DIR/usr/local/include/brotli\" \"$STAGE_DIR/usr/local/lib/pkgconfig\" && install -m 0755 \"$WRKBUILD/brotli\" \"$STAGE_DIR/usr/local/bin/brotli\" && install -m 0644 \"$WRKSRC\"/c/include/brotli/*.h \"$STAGE_DIR/usr/local/include/brotli/\" && for b in brotlicommon brotlidec brotlienc; do install -m 0644 \"$WRKBUILD/lib${b}-static.a\" \"$STAGE_DIR/usr/local/lib/lib${b}.a\" && install -m 0644 \"$WRKBUILD/lib${b}.pc\" \"$STAGE_DIR/usr/local/lib/pkgconfig/lib${b}.pc\"; done; fi",
+    "for b in brotlicommon brotlidec brotlienc; do if [ -f \"$STAGE_DIR/usr/local/lib/lib${b}-static.a\" ] && [ ! -f \"$STAGE_DIR/usr/local/lib/lib${b}.a\" ]; then cp -p \"$STAGE_DIR/usr/local/lib/lib${b}-static.a\" \"$STAGE_DIR/usr/local/lib/lib${b}.a\"; fi; done",
+    "for pc in \"$STAGE_DIR\"/usr/local/lib/pkgconfig/libbrotli*.pc; do if [ -f \"$pc\" ]; then sed -i.bak -e 's/-lbrotli\\([a-z]*\\)-static/-lbrotli\\1/g' -e 's/-R\\${libdir} //g' \"$pc\" && rm -f \"$pc.bak\"; fi; done",
+]
+
+[[applets]]
+sym = "brotli"
+binary = "/usr/local/bin/brotli"
+paths = ["/usr/local/bin/brotli"]

@@ -1,0 +1,22 @@
+port = "x11/st"
+only_for_targets = ["emulate/emscripten"]
+build_style = "make"
+use_gmake = false
+skip_distfiles = ["st-scrollback-0.9.2.diff"]
+patchfiles = []
+
+build_cmd = [
+    "make -j\"$JOBS\" CC=\"$CC\" PKG_CONFIG=\"$PKG_CONFIG\" PREFIX=/usr/local X11INC=/usr/X11R6/include X11LIB=/usr/X11R6/lib",
+]
+
+install_cmd = [
+    "install -d -m 0755 \"$STAGE_DIR/usr/local/bin\" \"$STAGE_DIR/usr/local/man/man1\" \"$STAGE_DIR/usr/local/share/terminfo\"",
+    "install -c -m 0755 st \"$STAGE_DIR/usr/local/bin/st\"",
+    "install -c -m 0444 st.1 \"$STAGE_DIR/usr/local/man/man1/st.1\"",
+    "tic -s -x -o \"$STAGE_DIR/usr/local/share/terminfo\" \"$WRKSRC/st.info\"",
+]
+
+[[applets]]
+sym = "st"
+binary = "/usr/local/bin/st"
+paths = ["/usr/local/bin/st"]

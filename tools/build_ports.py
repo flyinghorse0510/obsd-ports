@@ -1359,7 +1359,33 @@ def parse_plist_bins(meta_dir: pathlib.Path) -> List[str]:
     return bins
 
 
-_TOOLCHAIN_DIGESTS: Dict[Tuple[str, str, str, str, str], str] = {}
+_TOOLCHAIN_DIGESTS: Dict[Tuple[str, str, str, str, str, str, str], str] = {}
+
+
+def resolve_xenocara_build_dir(
+    openbsd_version: str,
+    backend: str,
+    pal: str,
+    explicit_dir: str = "",
+) -> Optional[pathlib.Path]:
+    if backend != "emulate" or pal != "emscripten":
+        return None
+    raw = (
+        explicit_dir.strip()
+        or os.environ.get("XENOCARA_BUILD_DIR", "").strip()
+        or os.environ.get("OBSD_X11_BUILD_DIR", "").strip()
+    )
+    if raw.lower() in ("none", "off", "0", "false"):
+        return None
+    if raw:
+        p = pathlib.Path(raw).resolve()
+        if not (p / "libobsdx11-libs.json").is_file():
+            die(f"invalid Xenocara build dir {p}: missing libobsdx11-libs.json")
+        return p
+    default_p = pathlib.Path("/var/tmp/sonvori-xenocara/build") / openbsd_version
+    if (default_p / "libobsdx11-libs.json").is_file():
+        return default_p.resolve()
+    return None
 
 
 def resolve_lane_sdk(pal: str, backend: str, explicit_sdk: str = "") -> str:
@@ -1423,12 +1449,14 @@ def toolchain_digest(
     pal: str,
     sdk: str = "",
     style: str = "",
+    x11_dir: Optional[pathlib.Path] = None,
 ) -> str:
     """Content digest of everything a port compiles against besides its own
     sources: sdk/ (wrappers, flags, autoconf/cmake or rust), the libobsdcompat
     `include-root-<v>` headers, and the lane identity/toolchain. Computed once per run."""
     eff_style = "cargo" if style == "cargo" else ""
-    key = (str(obsd_root), openbsd_version, backend, pal, sdk, eff_style)
+    x11_key = str(x11_dir) if (x11_dir is not None and eff_style != "cargo") else ""
+    key = (str(obsd_root), openbsd_version, backend, pal, sdk, eff_style, x11_key)
     if key not in _TOOLCHAIN_DIGESTS:
         h = hashlib.sha256()
         if eff_style == "cargo":
@@ -1448,6 +1476,10 @@ def toolchain_digest(
             _digest_tree(h, wasm_dir / f"include-root-{openbsd_version}", "include-root")
             ver_txt = obsd_root / "deps/emsdk/upstream/emscripten/emscripten-version.txt"
             h.update(b"[emsdk]" + (ver_txt.read_bytes() if ver_txt.is_file() else b"<missing>"))
+            if x11_dir is not None and eff_style != "cargo":
+                _digest_tree(h, x11_dir / "sdk/usr/X11R6/include", "x11-include")
+                libs_json = x11_dir / "libobsdx11-libs.json"
+                h.update(b"[x11-libs]" + (sha256_file(libs_json).encode() if libs_json.is_file() else b"<missing>"))
         elif pal == "darwin":
             if backend == "translate":
                 vec = obsd_root / f"build/openbsd/{openbsd_version}/translate/gen/guest-configure/tool-probe-vector.tsv"
@@ -1492,6 +1524,7 @@ def make_sdk_env(
     vendor_env: Dict[str, str],
     recipe: Dict[str, Any],
     jobs: int,
+    x11_dir: Optional[pathlib.Path] = None,
 ) -> Dict[str, str]:
     sdk_bin = REPO_ROOT / "sdk/bin"
     guest_arch = "arm64" if pal == "darwin" else "wasm64"
@@ -1526,7 +1559,27 @@ def make_sdk_env(
         REPO_ROOT / ("sdk/cmake/openbsd-darwin.cmake" if pal == "darwin" else "sdk/cmake/openbsd-wasm64.cmake")
     )
 
-    env["PATH"] = f"{sdk_bin}:{host_python_shim_dir()}:{env.get('PATH', '/usr/bin:/bin')}"
+    path_parts = [str(sdk_bin)]
+    if x11_dir is not None and backend == "emulate" and pal == "emscripten":
+        env["X11BASE"] = "/usr/X11R6"
+        env["OBSD_X11_BUILD_DIR"] = str(x11_dir)
+        path_parts.append(str(x11_dir / "sdk/usr/X11R6/bin"))
+    else:
+        env.pop("OBSD_X11_BUILD_DIR", None)
+    stage_bin_dir = stage_dir / "usr/local/bin"
+    if stage_bin_dir.is_dir():
+        cfg_scripts = sorted(p for p in stage_bin_dir.glob("*-config") if p.is_file() and not p.is_symlink())
+        if cfg_scripts:
+            cfg_shim_dir = wrkbuild / ".sdk-config-bin"
+            cfg_shim_dir.mkdir(parents=True, exist_ok=True)
+            for cs in cfg_scripts:
+                dst_cs = cfg_shim_dir / cs.name
+                if dst_cs.is_symlink() or dst_cs.exists():
+                    dst_cs.unlink()
+                dst_cs.symlink_to(cs)
+            path_parts.append(str(cfg_shim_dir))
+    path_parts.extend([str(host_python_shim_dir()), env.get("PATH", "/usr/bin:/bin")])
+    env["PATH"] = ":".join(path_parts)
     env["CC"] = cc
     env["CXX"] = cxx
     env["CPP"] = f"{cc} -E"
@@ -1669,6 +1722,7 @@ def build_single_port(
     sdk: str = "",
     force: bool = False,
     repo_root: Optional[pathlib.Path] = None,
+    x11_dir: Optional[pathlib.Path] = None,
 ) -> Dict[str, Any]:
     root = repo_root or REPO_ROOT
     section = recipe.get("section", "ports")
@@ -1718,7 +1772,9 @@ def build_single_port(
     # Header/SDK dependencies: a changed libobsdcompat include-root, SDK wrapper
     # or emsdk release must rebuild ports (no stale objects after a lib update).
     port_style = str(recipe.get("build_style", "gnu")).strip()
-    sig_h.update(toolchain_digest(obsd_root, openbsd_version, backend, pal, sdk, style=port_style).encode())
+    sig_h.update(
+        toolchain_digest(obsd_root, openbsd_version, backend, pal, sdk, style=port_style, x11_dir=x11_dir).encode()
+    )
     build_sig = sig_h.hexdigest()
 
     if not force and stamp_file.is_file():
@@ -1853,6 +1909,7 @@ def build_single_port(
         vendor_env=vendor_env,
         recipe=recipe,
         jobs=jobs,
+        x11_dir=x11_dir,
     )
     guest_arch = env["OBSD_GUEST_ARCH"]
     exp_args = lambda seq: [str(x).replace("${OBSD_GUEST_ARCH}", guest_arch) for x in seq]
@@ -2241,6 +2298,7 @@ def cmd_build(args: argparse.Namespace) -> int:
     require_libobsdcompat_lane_outputs(obsd_root, args.openbsd_version, args.backend, args.pal, sdk)
     if args.pal == "emscripten":
         obsd_env.ensure_emsdk_python(obsd_root)
+    x11_dir = resolve_xenocara_build_dir(args.openbsd_version, args.backend, args.pal, args.xenocara_build_dir)
     recipes = discover_recipes(
         args.openbsd_version,
         [args.port] if args.port else None,
@@ -2265,6 +2323,7 @@ def cmd_build(args: argparse.Namespace) -> int:
             lane_dir=lane_dir,
             jobs=args.jobs,
             force=args.force,
+            x11_dir=x11_dir,
         )
     return 0
 
@@ -2275,6 +2334,7 @@ def cmd_package(args: argparse.Namespace) -> int:
     require_libobsdcompat_lane_outputs(obsd_root, args.openbsd_version, args.backend, args.pal, sdk)
     if args.pal == "emscripten":
         obsd_env.ensure_emsdk_python(obsd_root)
+    x11_dir = resolve_xenocara_build_dir(args.openbsd_version, args.backend, args.pal, args.xenocara_build_dir)
     lane_dir = compute_lane_dir(args.openbsd_version, args.backend, args.pal, sdk, args.build_root)
     lane_dir.mkdir(parents=True, exist_ok=True)
 
@@ -2336,7 +2396,10 @@ def cmd_package(args: argparse.Namespace) -> int:
         "--manifest",
         str(manifest_file),
     ]
-    return subprocess.run(cmd).returncode
+    pkg_env = dict(os.environ)
+    if x11_dir is not None:
+        pkg_env["OBSD_X11_BUILD_DIR"] = str(x11_dir)
+    return subprocess.run(cmd, env=pkg_env).returncode
 
 
 def main() -> int:
@@ -2356,6 +2419,7 @@ def main() -> int:
         sp.add_argument("--section", default="all", choices=("all", "ports", "extra"))
         sp.add_argument("--build-root", default="")
         sp.add_argument("--sdk", default="")
+        sp.add_argument("--xenocara-build-dir", default="")
         sp.add_argument("--libobsdcompat-root", default="")
         sp.add_argument("--port", default="")
         sp.add_argument("--jobs", type=int, default=os.cpu_count() or 8)

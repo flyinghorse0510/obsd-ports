@@ -1,0 +1,26 @@
+port = "graphics/jpeg"
+only_for_targets = ["emulate/emscripten"]
+build_style = "cmake"
+separate_build = true
+
+cmake_args = [
+    "-DENABLE_SHARED=OFF",
+    "-DENABLE_STATIC=ON",
+    "-DWITH_SIMD=OFF",
+    "-DWITH_JAVA=OFF",
+]
+
+[[applets]]
+sym = "cjpeg"
+binary = "/usr/local/bin/cjpeg"
+paths = ["/usr/local/bin/cjpeg"]
+
+[[applets]]
+sym = "djpeg"
+binary = "/usr/local/bin/djpeg"
+paths = ["/usr/local/bin/djpeg"]
+
+[[applets]]
+sym = "jpegtran"
+binary = "/usr/local/bin/jpegtran"
+paths = ["/usr/local/bin/jpegtran"]

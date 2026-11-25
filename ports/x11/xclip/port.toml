@@ -1,0 +1,26 @@
+port = "x11/xclip"
+only_for_targets = ["emulate/emscripten"]
+build_style = "gnu"
+use_gmake = true
+
+pre_configure = [
+    "autoreconf -fi",
+]
+
+cppflags = [
+    "-I/usr/X11R6/include",
+]
+
+ldflags = [
+    "-L/usr/X11R6/lib",
+]
+
+configure_args = [
+    "--x-includes=/usr/X11R6/include",
+    "--x-libraries=/usr/X11R6/lib",
+]
+
+[[applets]]
+sym = "xclip"
+binary = "/usr/local/bin/xclip"
+paths = ["/usr/local/bin/xclip"]

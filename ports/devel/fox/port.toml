@@ -1,0 +1,63 @@
+port = "devel/fox"
+only_for_targets = ["emulate/emscripten"]
+depends = ["archivers/bzip2", "graphics/jpeg", "graphics/png", "graphics/tiff"]
+build_style = "gnu"
+use_gmake = true
+
+cxxflags = [
+    "-std=gnu++14",
+]
+
+cppflags = [
+    "-Wno-register",
+    "-I/usr/X11R6/include",
+    "-I/usr/X11R6/include/freetype2",
+]
+
+ldflags = [
+    "-L/usr/X11R6/lib",
+]
+
+libs = [
+    "-lzstd",
+    "-llzma",
+]
+
+configure_args = [
+    "--sysconfdir=/usr/local/etc",
+    "--with-x",
+    "--with-xft",
+    "--with-opengl=yes",
+    "--enable-release",
+    "--x-includes=/usr/X11R6/include",
+    "--x-libraries=/usr/X11R6/lib",
+]
+
+post_configure = [
+    "clang -x c++ -O2 -fno-exceptions -fno-rtti \"$WRKSRC/utils/reswrap.cpp\" -o \"$WRKBUILD/.host-reswrap\"",
+    "for mf in \"$WRKBUILD\"/*/Makefile \"$WRKBUILD/Makefile\"; do if [ -f \"$mf\" ]; then sed -i.bak -e \"s|^RESWRAP[[:space:]]*=.*|RESWRAP = $WRKBUILD/.host-reswrap|g\" -e \"s|\\.\\./utils/reswrap|$WRKBUILD/.host-reswrap|g\" -e \"s|\\$(top_builddir)/utils/reswrap|$WRKBUILD/.host-reswrap|g\" \"$mf\" && rm -f \"$mf.bak\"; fi; done",
+]
+
+post_install = [
+    "rm -f \"$WRKBUILD/.host-reswrap\"",
+]
+
+[[applets]]
+sym = "adie"
+binary = "/usr/local/bin/adie"
+paths = ["/usr/local/bin/adie"]
+
+[[applets]]
+sym = "PathFinder"
+binary = "/usr/local/bin/PathFinder"
+paths = ["/usr/local/bin/PathFinder"]
+
+[[applets]]
+sym = "calculator"
+binary = "/usr/local/bin/calculator"
+paths = ["/usr/local/bin/calculator"]
+
+[[applets]]
+sym = "shutterbug"
+binary = "/usr/local/bin/shutterbug"
+paths = ["/usr/local/bin/shutterbug"]

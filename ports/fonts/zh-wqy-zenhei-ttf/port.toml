@@ -1,0 +1,8 @@
+port = "fonts/zh-wqy-zenhei-ttf"
+only_for_targets = ["emulate/emscripten"]
+build_style = "script"
+
+build_cmd = [
+    "install -d -m 0755 \"$STAGE_DIR/usr/local/share/fonts/wqy\"",
+    "install -c -m 0644 \"$WRKSRC/wqy-zenhei.ttc\" \"$STAGE_DIR/usr/local/share/fonts/wqy/wqy-zenhei.ttc\"",
+]

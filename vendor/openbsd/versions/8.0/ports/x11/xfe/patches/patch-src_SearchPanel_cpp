@@ -1,0 +1,31 @@
+No tar -a, use archivers/gtar
+
+Index: src/SearchPanel.cpp
+--- src/SearchPanel.cpp.orig
++++ src/SearchPanel.cpp
+@@ -2813,6 +2813,12 @@ long SearchPanel::onCmdAddToArch(FXObject* sender, FXS
+             cmd = "tar -acvf " + archive + " ";
+         }
+ 
++        // Change tar to gtar
++        if (compare(cmd, "tar ", 4) == 0)
++        {
++            cmd.prepend('g');
++        }
++
+         for (int u = 0; u < list->getNumItems(); u++)
+         {
+             if (list->isItemSelected(u))
+@@ -2932,6 +2938,12 @@ long SearchPanel::onCmdExtract(FXObject*, FXSelector, 
+         else
+         {
+             cmd = "tar -axvf ";
++        }
++
++        // Change tar to gtar
++        if (compare(cmd, "tar ", 4) == 0)
++        {
++            cmd.prepend('g');
+         }
+ 
+         // Final extract command

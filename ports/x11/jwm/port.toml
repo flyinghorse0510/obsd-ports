@@ -1,0 +1,39 @@
+port = "x11/jwm"
+only_for_targets = ["emulate/emscripten"]
+depends = ["graphics/jpeg", "graphics/png"]
+build_style = "gnu"
+use_gmake = true
+
+cppflags = [
+    "-I/usr/X11R6/include",
+    "-I/usr/X11R6/include/freetype2",
+]
+
+ldflags = [
+    "-L/usr/X11R6/lib",
+]
+
+configure_args = [
+    "--sysconfdir=/usr/local/etc",
+    "--disable-cairo",
+    "--disable-rsvg",
+    "--disable-nls",
+    "--enable-jpeg",
+    "--enable-png",
+    "--enable-xft",
+    "--enable-xpm",
+    "--enable-xinerama",
+    "--x-includes=/usr/X11R6/include",
+    "--x-libraries=/usr/X11R6/lib",
+]
+
+post_install = [
+    "install -d -m 0755 \"$STAGE_DIR/usr/local/etc\" \"$STAGE_DIR/usr/local/share/examples/jwm\"",
+    "if [ ! -f \"$STAGE_DIR/usr/local/etc/system.jwmrc\" ] && [ -f \"$WRKSRC/example.jwmrc\" ]; then install -c -m 0644 \"$WRKSRC/example.jwmrc\" \"$STAGE_DIR/usr/local/etc/system.jwmrc\"; fi",
+    "if [ -f \"$STAGE_DIR/usr/local/etc/system.jwmrc\" ]; then install -c -m 0644 \"$STAGE_DIR/usr/local/etc/system.jwmrc\" \"$STAGE_DIR/usr/local/share/examples/jwm/system.jwmrc\"; fi",
+]
+
+[[applets]]
+sym = "jwm"
+binary = "/usr/local/bin/jwm"
+paths = ["/usr/local/bin/jwm"]

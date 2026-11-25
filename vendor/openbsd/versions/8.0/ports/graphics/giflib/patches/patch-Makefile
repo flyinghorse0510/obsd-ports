@@ -1,0 +1,48 @@
+Index: Makefile
+--- Makefile.orig
++++ Makefile
+@@ -95,7 +95,7 @@ SOEXTENSION	= so
+ LIBGIFSO	= libgif.$(SOEXTENSION)
+ LIBGIFSOMAJOR	= libgif.$(SOEXTENSION).$(LIBMAJOR)
+ LIBGIFSOVER	= libgif.$(SOEXTENSION).$(LIBVER)
+-LIBUTILSO	= libutil.$(SOEXTENSION)
++LIBUTILSO	= libutil.$(SOEXTENSION).$(LIBVER)
+ LIBUTILSOMAJOR	= libutil.$(SOEXTENSION).$(LIBMAJOR)
+ ifeq ($(UNAME), Darwin)
+ SOEXTENSION	= dylib
+@@ -125,7 +125,7 @@ $(LIBGIFSO): $(OBJECTS) $(HEADERS)
+ ifeq ($(UNAME), Darwin)
+ 	$(CC) $(CFLAGS) -dynamiclib -current_version $(LIBVER) $(OBJECTS) -o $(LIBGIFSO)
+ else
+-	$(CC) $(CFLAGS) $(CPPFLAGS) -shared $(LDFLAGS) -Wl,-soname -Wl,$(LIBGIFSOMAJOR) -o $(LIBGIFSO) $(OBJECTS)
++	$(CC) $(CFLAGS) -shared $(LDFLAGS) -o $(LIBGIFSO) $(OBJECTS)
+ endif
+ 
+ libgif.a: $(OBJECTS) $(HEADERS)
+@@ -135,7 +135,7 @@ $(LIBUTILSO): $(UOBJECTS) $(UHEADERS)
+ ifeq ($(UNAME), Darwin)
+ 	$(CC) $(CFLAGS) -dynamiclib -current_version $(LIBVER) $(UOBJECTS) -o $(LIBUTILSO)
+ else
+-	$(CC) $(CFLAGS) $(CPPLAGS) -shared $(LDFLAGS) -Wl,-soname -Wl,$(LIBUTILSOMAJOR) -o $(LIBUTILSO) $(UOBJECTS)
++	$(CC) $(CFLAGS) -shared $(LDFLAGS) -o $(LIBUTILSO) $(UOBJECTS)
+ endif
+ 
+ libutil.a: $(UOBJECTS) $(UHEADERS)
+@@ -169,7 +169,7 @@ spellcheck:
+ ifeq ($(UNAME), Darwin)
+ install: all install-bin install-include install-lib
+ else
+-install: all install-bin install-include install-lib install-man install-doc
++install: all install-bin install-include install-lib install-man
+ endif
+ 
+ install-bin: $(INSTALLABLE)
+@@ -184,8 +184,6 @@ install-static-lib:
+ install-shared-lib:
+ 	$(INSTALL) -d "$(DESTDIR)$(LIBDIR)"
+ 	$(INSTALL) -m 755 $(LIBGIFSO) "$(DESTDIR)$(LIBDIR)/$(LIBGIFSOVER)"
+-	ln -sf $(LIBGIFSOVER) "$(DESTDIR)$(LIBDIR)/$(LIBGIFSOMAJOR)"
+-	ln -sf $(LIBGIFSOMAJOR) "$(DESTDIR)$(LIBDIR)/$(LIBGIFSO)"
+ install-lib: install-static-lib install-shared-lib
+ install-man:
+ 	$(INSTALL) -d "$(DESTDIR)$(MANDIR)/man1" "$(DESTDIR)$(MANDIR)/man7"

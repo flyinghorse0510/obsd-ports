@@ -689,11 +689,11 @@ def test_matrix_and_package_desc_emission() -> None:
     )
     assert json.loads(out_tr)["target_name"] == "aarch64-apple-darwin"
 
-    # Verify Darwin recipes discover cleanly (53 C/C++ ports) while Emscripten discovers full 80
+    # Verify Darwin recipes discover cleanly (53 C/C++ ports) while Emscripten discovers full 98
     darwin_recs = bp.discover_recipes("8.0", backend="emulate", pal="darwin", section="all")
     wasm_recs = bp.discover_recipes("8.0", backend="emulate", pal="emscripten", section="all")
     assert len(darwin_recs) == 53, f"expected 53 Darwin ports, got {len(darwin_recs)}"
-    assert len(wasm_recs) == 80, f"expected 80 WASM ports, got {len(wasm_recs)}"
+    assert len(wasm_recs) == 98, f"expected 98 WASM ports, got {len(wasm_recs)}"
 
     # Verify emit_port_packages writes both +CONTENTS and +DESC into <pkgname>.tgz
     with tempfile.TemporaryDirectory(prefix="obsd-test-pkgdesc-") as td:

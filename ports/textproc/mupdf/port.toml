@@ -1,0 +1,35 @@
+port = "textproc/mupdf"
+only_for_targets = ["emulate/emscripten"]
+build_style = "make"
+use_gmake = true
+
+pre_configure = [
+    "if [ -d \"$WRKSRC/thirdparty/mujs\" ]; then find \"$WRKSRC/thirdparty/mujs\" -maxdepth 1 -type f ! -name 'regexp.c' ! -name 'regexp.h' ! -name 'utf.c' ! -name 'utf.h' ! -name 'utfdata.h' -delete; fi",
+]
+
+build_cmd = [
+    "gmake -j\"$JOBS\" CC=\"$CC\" CXX=\"$CXX\" AR=\"$AR\" CC_FOR_BUILD=clang USE_SYSTEM_LIBS=no shared=no build=release HAVE_OBJCOPY=no HAVE_GLUT=no HAVE_CURL=no HAVE_LEPTONICA=no HAVE_TESSERACT=no HAVE_MUJS=no mujs=no HAVE_X11=yes X11_CFLAGS=\"-I/usr/X11R6/include\" X11_LIBS=\"-L/usr/X11R6/lib -lX11 -lXext -lXrandr\" SYS_X11_CFLAGS=\"-I/usr/X11R6/include\" SYS_X11_LIBS=\"-L/usr/X11R6/lib -lX11 -lXext -lXrandr\" XCFLAGS=\"$CFLAGS -I/usr/X11R6/include\" LDFLAGS=\"$LDFLAGS -L/usr/X11R6/lib\" prefix=/usr/local mandir=/usr/local/man build/release/mutool build/release/mupdf-x11",
+]
+
+install_cmd = [
+    "install -d -m 0755 \"$STAGE_DIR/usr/local/bin\" \"$STAGE_DIR/usr/local/man/man1\" \"$STAGE_DIR/usr/local/share/pixmaps\"",
+    "install -c -m 0755 \"$WRKSRC/build/release/mupdf-x11\" \"$STAGE_DIR/usr/local/bin/mupdf-x11\"",
+    "ln -sf mupdf-x11 \"$STAGE_DIR/usr/local/bin/mupdf\"",
+    "install -c -m 0755 \"$WRKSRC/build/release/mutool\" \"$STAGE_DIR/usr/local/bin/mutool\"",
+    "install -c -m 0444 \"$WRKSRC/docs/man/mupdf.1\" \"$WRKSRC/docs/man/mutool.1\" \"$STAGE_DIR/usr/local/man/man1/\"",
+    "if [ -f \"$VENDOR_PORT_DIR/files/mupdf.xpm\" ]; then install -c -m 0644 \"$VENDOR_PORT_DIR/files/mupdf.xpm\" \"$STAGE_DIR/usr/local/share/pixmaps/mupdf.xpm\"; fi",
+    "find \"$WRKSRC/build\" -name '*.exe' -delete || true",
+]
+
+[[applets]]
+sym = "mupdf_x11"
+binary = "/usr/local/bin/mupdf-x11"
+paths = [
+    "/usr/local/bin/mupdf-x11",
+    "/usr/local/bin/mupdf",
+]
+
+[[applets]]
+sym = "mutool"
+binary = "/usr/local/bin/mutool"
+paths = ["/usr/local/bin/mutool"]

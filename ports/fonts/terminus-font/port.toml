@@ -1,0 +1,27 @@
+port = "fonts/terminus-font"
+only_for_targets = ["emulate/emscripten"]
+build_style = "simple"
+configure_host = false
+configure_default_args = false
+use_gmake = true
+
+configure_args = [
+    "--prefix=/usr/local",
+    "--x11dir=/usr/local/share/fonts/terminus",
+]
+
+build_cmd = [
+    "gmake -j\"$JOBS\" pcf pcf-8bit otb INT=python3",
+    "gzip -9nf *.pcf",
+]
+
+install_cmd = [
+    "mkfontscale \"$WRKSRC\"",
+    "mkfontdir \"$WRKSRC\"",
+    "grep -E '\\.pcf\\.gz' \"$WRKSRC/fonts.dir\" | sed 's/\\.pcf\\.gz//g' > \"$WRKSRC/fonts.alias\"",
+    "install -d -m 0755 \"$STAGE_DIR/usr/local/share/fonts/terminus\"",
+    "install -c -m 0644 \"$WRKSRC\"/*.pcf.gz \"$STAGE_DIR/usr/local/share/fonts/terminus/\"",
+    "install -c -m 0644 \"$WRKSRC\"/*.otb \"$STAGE_DIR/usr/local/share/fonts/terminus/\"",
+    "install -c -m 0644 \"$WRKSRC/fonts.dir\" \"$WRKSRC/fonts.scale\" \"$WRKSRC/fonts.alias\" \"$STAGE_DIR/usr/local/share/fonts/terminus/\"",
+    "install -c -m 0644 \"$WRKSRC/fonts.alias\" \"$STAGE_DIR/usr/local/share/fonts/terminus/fonts.alias-terminus\"",
+]

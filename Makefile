@@ -8,7 +8,7 @@ ifneq ($(value MAKEOVERRIDES),$${-*-command-variables-*-})
 $(error MAKEOVERRIDES must remain GNU Make's canonical command-variable ledger)
 endif
 endif
-override TOP_GUARDED_ENV_VARS := MAKEFILE_ROOT OPENBSD_VERSION COMPAT_BACKEND COMPAT_PAL COMPAT_SDK LIBOBSDCOMPAT_ROOT SECTION PORT FILTER BUILD_ROOT CACHE_ROOT JOBS PYTHON
+override TOP_GUARDED_ENV_VARS := MAKEFILE_ROOT OPENBSD_VERSION COMPAT_BACKEND COMPAT_PAL COMPAT_SDK LIBOBSDCOMPAT_ROOT XENOCARA_BUILD_DIR SECTION PORT FILTER BUILD_ROOT CACHE_ROOT JOBS PYTHON
 override TOP_UNSAFE_COMMAND_LINE_MAKE_VALUES := $(sort $(foreach _top_variable,$(.VARIABLES),$(if $(and $(filter command line,$(origin $(_top_variable))),$(findstring $$,$(value $(_top_variable)))),$(_top_variable))))
 override TOP_UNSAFE_ENVIRONMENT_MAKE_VALUES := $(sort $(foreach _top_variable,$(TOP_GUARDED_ENV_VARS),$(if $(and $(filter environment,$(word 1,$(origin $(_top_variable)))),$(findstring $$,$(value $(_top_variable)))),$(_top_variable))))
 ifneq ($(strip $(TOP_UNSAFE_COMMAND_LINE_MAKE_VALUES)),)

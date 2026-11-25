@@ -39,13 +39,14 @@ fetch:
 build:
 	@$(REQUIRE_PYTHON)
 	@$(REQUIRE_LIBOBSDCOMPAT)
-	LIBOBSDCOMPAT_ROOT="$(LIBOBSDCOMPAT_ROOT)" COMPAT_SDK="$(COMPAT_SDK)" "$(PYTHON)" -I "$(TOOLS_ROOT)/build_ports.py" build \
+	LIBOBSDCOMPAT_ROOT="$(LIBOBSDCOMPAT_ROOT)" COMPAT_SDK="$(COMPAT_SDK)" XENOCARA_BUILD_DIR="$(XENOCARA_BUILD_DIR)" "$(PYTHON)" -I "$(TOOLS_ROOT)/build_ports.py" build \
 		--openbsd-version "$(OPENBSD_VERSION)" \
 		--backend "$(COMPAT_BACKEND)" \
 		--pal "$(COMPAT_PAL)" \
 		--section "$(SECTION)" \
 		--build-root "$(BUILD_ROOT)" \
 		$(if $(strip $(COMPAT_SDK)),--sdk "$(COMPAT_SDK)",) \
+		$(if $(strip $(XENOCARA_BUILD_DIR)),--xenocara-build-dir "$(XENOCARA_BUILD_DIR)",) \
 		--libobsdcompat-root "$(LIBOBSDCOMPAT_ROOT)" \
 		--jobs "$(JOBS)" \
 		$(if $(strip $(PORT)),--port "$(PORT)",)
@@ -53,13 +54,14 @@ build:
 package: build
 	@$(REQUIRE_PYTHON)
 	@$(REQUIRE_LIBOBSDCOMPAT)
-	LIBOBSDCOMPAT_ROOT="$(LIBOBSDCOMPAT_ROOT)" COMPAT_SDK="$(COMPAT_SDK)" "$(PYTHON)" -I "$(TOOLS_ROOT)/build_ports.py" package \
+	LIBOBSDCOMPAT_ROOT="$(LIBOBSDCOMPAT_ROOT)" COMPAT_SDK="$(COMPAT_SDK)" XENOCARA_BUILD_DIR="$(XENOCARA_BUILD_DIR)" "$(PYTHON)" -I "$(TOOLS_ROOT)/build_ports.py" package \
 		--openbsd-version "$(OPENBSD_VERSION)" \
 		--backend "$(COMPAT_BACKEND)" \
 		--pal "$(COMPAT_PAL)" \
 		--section "$(SECTION)" \
 		--build-root "$(BUILD_ROOT)" \
 		$(if $(strip $(COMPAT_SDK)),--sdk "$(COMPAT_SDK)",) \
+		$(if $(strip $(XENOCARA_BUILD_DIR)),--xenocara-build-dir "$(XENOCARA_BUILD_DIR)",) \
 		--libobsdcompat-root "$(LIBOBSDCOMPAT_ROOT)" \
 		--jobs "$(JOBS)" \
 		$(if $(strip $(PORT)),--port "$(PORT)",)

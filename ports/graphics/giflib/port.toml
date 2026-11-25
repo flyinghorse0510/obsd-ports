@@ -1,0 +1,14 @@
+port = "graphics/giflib"
+only_for_targets = ["emulate/emscripten"]
+build_style = "make"
+use_gmake = true
+
+build_cmd = [
+    "gmake -j\"$JOBS\" libgif.a CC=\"$CC\" AR=\"$AR\" OFLAGS=\"$CFLAGS -DHAVE_REALLOCARRAY\"",
+]
+
+install_cmd = [
+    "install -d -m 0755 \"$STAGE_DIR/usr/local/include\" \"$STAGE_DIR/usr/local/lib\"",
+    "install -c -m 0644 gif_lib.h \"$STAGE_DIR/usr/local/include/gif_lib.h\"",
+    "install -c -m 0644 libgif.a \"$STAGE_DIR/usr/local/lib/libgif.a\"",
+]

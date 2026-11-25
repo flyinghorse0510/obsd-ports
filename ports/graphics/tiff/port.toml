@@ -1,0 +1,17 @@
+port = "graphics/tiff"
+only_for_targets = ["emulate/emscripten"]
+depends = ["graphics/jpeg", "archivers/xz", "archivers/zstd"]
+build_style = "cmake"
+separate_build = true
+
+cmake_args = [
+    "-Dlerc=OFF",
+    "-Djbig=OFF",
+    "-Dlibdeflate=OFF",
+    "-Dwebp=OFF",
+    "-Dtiff-docs=OFF",
+    "-Dtiff-contrib=OFF",
+    "-Dtiff-tests=OFF",
+    "-Dtiff-opengl=OFF",
+    "-Dtiff-tools=OFF",
+]

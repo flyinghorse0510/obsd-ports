@@ -1,0 +1,40 @@
+port = "x11/fltk"
+only_for_targets = ["emulate/emscripten"]
+depends = ["graphics/jpeg", "graphics/png"]
+build_style = "gnu"
+use_gmake = true
+
+pre_configure = [
+    "autoconf",
+    "sed -i.bak 's,\\${SYSCONFDIR},/usr/local/etc,g' \"$WRKSRC/src/Fl_Preferences.cxx\" && rm -f \"$WRKSRC/src/Fl_Preferences.cxx.bak\"",
+]
+
+cppflags = [
+    "-I/usr/X11R6/include",
+    "-I/usr/X11R6/include/freetype2",
+]
+
+ldflags = [
+    "-L/usr/X11R6/lib",
+]
+
+configure_args = [
+    "--sysconfdir=/usr/local/etc",
+    "--enable-threads",
+    "--enable-xft",
+    "--enable-xinerama",
+    "--enable-xfixes",
+    "--enable-xcursor",
+    "--enable-xrender",
+    "--enable-gl",
+    "--disable-localjpeg",
+    "--disable-localpng",
+    "--disable-localzlib",
+    "--x-includes=/usr/X11R6/include",
+    "--x-libraries=/usr/X11R6/lib",
+]
+
+[[applets]]
+sym = "fluid"
+binary = "/usr/local/bin/fluid"
+paths = ["/usr/local/bin/fluid"]

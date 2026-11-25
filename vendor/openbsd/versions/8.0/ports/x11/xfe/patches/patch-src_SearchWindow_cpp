@@ -1,0 +1,23 @@
+Remove gnuisms. The Find Hidden checkbox does nothing now.
+
+Index: src/SearchWindow.cpp
+--- src/SearchWindow.cpp.orig
++++ src/SearchWindow.cpp
+@@ -800,7 +800,7 @@ long SearchWindow::onCmdStart(FXObject*, FXSelector, v
+     // Don't follow symlinks
+     if (linkbtn->getCheck())
+     {
+-        searchcommand = "find -P " + xf_quote(wheredir->getText());
++        searchcommand = "find " + xf_quote(wheredir->getText());
+     }
+     else
+     {
+@@ -906,7 +906,7 @@ long SearchWindow::onCmdStart(FXObject*, FXSelector, v
+     // Hidden files
+     if (!findhidden->getCheck())
+     {
+-        searchcommand += " \\( ! -regex '.*/\\..*' \\)";
++        searchcommand += " ! -path .";
+     }
+ 
+     // Without grep command
