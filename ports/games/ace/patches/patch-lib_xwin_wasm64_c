@@ -1,0 +1,23 @@
+Fix WASM64 `call_indirect` function signature mismatch in `png_reader`.
+`libpng`'s `png_rw_ptr` is `void (*)(png_structp, png_bytep, png_size_t)` (`(i64, i64, i64) -> void` on LP64/WASM64), whereas `ace` declared `length` as `png_uint_32` (`i32`) and masked the mismatch with `(png_rw_ptr)`.
+
+--- lib/xwin.c.orig
++++ lib/xwin.c
+@@ -580,7 +580,7 @@ static XImage *exemplar_image = 0;
+ static XImage *exemplar_image = 0;
+ 
+ static void
+-png_reader (png_structp png_ptr, png_bytep data, png_uint_32 length)
++png_reader (png_structp png_ptr, png_bytep data, png_size_t length)
+ {
+   char **bytes = (char **)png_get_io_ptr (png_ptr);
+   memcpy (data, *bytes, length);
+@@ -847,7 +847,7 @@ build_image (image *src)
+   }
+ 
+   file_bytes = src->file_data;
+-  png_set_read_fn (png_ptr, (png_voidp)&file_bytes, (png_rw_ptr)png_reader);
++  png_set_read_fn (png_ptr, (png_voidp)&file_bytes, png_reader);
+ 
+   png_read_info (png_ptr, info_ptr);
+ 
