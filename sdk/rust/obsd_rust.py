@@ -1375,8 +1375,11 @@ def run_obsd_cargo(argv: Sequence[str]) -> int:
             cmd.append("--offline")
         if not has_target:
             cmd.extend(["--target", target_cfg["target_arg"]])
+        opt_level = os.environ.get("OBSD_CARGO_OPT_LEVEL", "s").strip() or "s"
         cmd.extend(
             [
+                "--config",
+                f'profile.release.opt-level="{opt_level}"',
                 "--config",
                 'profile.release.strip="debuginfo"',
                 "--config",
