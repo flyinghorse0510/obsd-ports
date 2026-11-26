@@ -83,6 +83,35 @@ BASE_OPENBSD_LIBS: Set[str] = {
     "event",
 }
 
+# Staged static port libraries in `stage/usr/local/lib/lib<name>.a` that are kept
+# undefined in individual WASM64 port applet `.o` closures and linked once into
+# `guest-partial.o`'s shared `B_lib` slice via `libobsdports-shared-wasm-<ver>.a`.
+SHARED_PORT_LIBS: Set[str] = {
+    "FOX-1.6",
+    "fltk",
+    "fltk_forms",
+    "fltk_gl",
+    "fltk_images",
+    "jpeg",
+    "webp",
+    "webpdemux",
+    "webpmux",
+    "sharpyuv",
+    "tiff",
+    "tiffxx",
+    "gif",
+    "brotlicommon",
+    "brotlidec",
+    "brotlienc",
+    "archive",
+    "xml2",
+    "zstd",
+    "lzma",
+    "bz2",
+    "lz4",
+    "iconv",
+}
+
 WASM_BOUNDARY_IMPORTS: Set[str] = {
     "__obsd_wasm_gate",
     "__obsd_wasm_setjmp",
@@ -667,6 +696,13 @@ class EmscriptenToolchain:
             if self.x11_build_dir is not None
             else set()
         )
+        raw_sp = os.environ.get("OBSD_SHARED_PORT_LIBS", "1").strip().lower()
+        self.shared_port_libs: Set[str] = (
+            set(SHARED_PORT_LIBS)
+            if (self.backend == "emulate" and self.pal == "emscripten" and raw_sp not in ("0", "off", "false", "none"))
+            else set()
+        )
+        self._archive_def_cache: Dict[str, Set[str]] = {}
 
         emsdk_root = self.obsd_root / "deps/emsdk"
         em_dir = emsdk_root / "upstream/emscripten"
@@ -811,6 +847,51 @@ class EmscriptenToolchain:
         if rp.is_relative_to(stage_lib):
             return True
         return False
+
+    def shared_port_archive_stem(self, path_str: str) -> Optional[str]:
+        if not self.shared_port_libs or not path_str.endswith(".a"):
+            return None
+        bn = os.path.basename(path_str)
+        if not (bn.startswith("lib") and len(bn) > 5):
+            return None
+        stem = bn[3:-2]
+        matched: Optional[str] = None
+        if stem in self.shared_port_libs:
+            matched = stem
+        elif stem.endswith("-static") and stem[:-7] in self.shared_port_libs:
+            matched = stem[:-7]
+        if matched is None:
+            return None
+        p = pathlib.Path(path_str)
+        return matched if p.is_file() else None
+
+    def archive_defined_symbols(self, ar_path: pathlib.Path) -> Set[str]:
+        rp = ar_path.resolve()
+        st = rp.stat()
+        sig = f"{rp}:{st.st_size}:{st.st_mtime_ns}"
+        if sig in self._archive_def_cache:
+            return self._archive_def_cache[sig]
+        key = hashlib.sha1(sig.encode("utf-8")).hexdigest()[:16]
+        cache_file = self.cache_dir / f"ar-defs-{self.openbsd_version}-{key}.json"
+        if cache_file.is_file():
+            syms = set(json.loads(cache_file.read_text(encoding="utf-8")))
+            self._archive_def_cache[sig] = syms
+            return syms
+        out = subprocess.check_output(
+            [str(self.llvm_nm), "--defined-only", "-g", str(rp)],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        syms = set()
+        for ln in out.splitlines():
+            ps = ln.split()
+            if len(ps) >= 3 and not ln.endswith(":"):
+                syms.add(ps[-1])
+        tmp = cache_file.with_suffix(f".{os.getpid()}.json.tmp")
+        tmp.write_text(json.dumps(sorted(syms)), encoding="utf-8")
+        tmp.replace(cache_file)
+        self._archive_def_cache[sig] = syms
+        return syms
 
 
 # Backwards-compatibility alias
@@ -1452,7 +1533,11 @@ def wrap_wasm_init_funcs(ctx: EmscriptenToolchain, obj_path: pathlib.Path, tmp_d
     ).returncode
 
 
-def verify_undefined_symbols(ctx: EmscriptenToolchain, obj_path: pathlib.Path) -> Optional[List[str]]:
+def verify_undefined_symbols(
+    ctx: EmscriptenToolchain,
+    obj_path: pathlib.Path,
+    extra_archives: Sequence[pathlib.Path] = (),
+) -> Optional[List[str]]:
     proc = subprocess.run(
         [str(ctx.llvm_nm), "-u", str(obj_path)],
         stdout=subprocess.PIPE,
@@ -1483,7 +1568,10 @@ def verify_undefined_symbols(ctx: EmscriptenToolchain, obj_path: pathlib.Path) -
         if len(ps) >= 2 and not ln.endswith(":"):
             defined_self.add(ps[-1])
 
-    allowed = ctx.allowed_undefined_symbols()
+    allowed = set(ctx.allowed_undefined_symbols())
+    for ar_p in extra_archives:
+        if ar_p.is_file():
+            allowed |= ctx.archive_defined_symbols(ar_p)
     missing = sorted(s for s in (undefs - defined_self) if s not in allowed)
     return missing or None
 
@@ -1677,7 +1765,26 @@ def run_emscripten_cc_driver(argv: List[str], is_cxx: bool) -> int:
             i += 1
             continue
         if is_object_or_archive(a):
-            link_items.append(("obj", resolve_lo_file(a)))
+            resolved_obj = resolve_lo_file(a)
+            link_items.append(("obj", resolved_obj))
+            if a.endswith(".la") and pathlib.Path(a).is_file():
+                try:
+                    for ln in pathlib.Path(a).read_text(encoding="utf-8", errors="replace").splitlines():
+                        if ln.startswith("dependency_libs="):
+                            dep_raw = ln.split("=", 1)[1].strip().strip("'\"")
+                            for dtok in shlex.split(dep_raw):
+                                if dtok.startswith("-L") and len(dtok) > 2:
+                                    rl = ctx.remap_lib_dir(dtok[2:])
+                                    if rl and rl not in lib_dirs:
+                                        lib_dirs.append(rl)
+                                elif dtok.startswith("-l") and len(dtok) > 2:
+                                    link_items.append(("la_dep_lib", dtok[2:]))
+                                elif dtok.endswith((".la", ".a")):
+                                    ro = resolve_lo_file(dtok)
+                                    if pathlib.Path(ro).is_file():
+                                        link_items.append(("la_dep_obj", ro))
+                except OSError:
+                    pass
             i += 1
             continue
         compile_user_args.append(a)
@@ -1713,6 +1820,7 @@ def run_emscripten_cc_driver(argv: List[str], is_cxx: bool) -> int:
         tmp_p = pathlib.Path(tmpdir)
         ld_inputs: List[str] = []
         ld_extra_flags: List[str] = []
+        deferred_shared_archives: List[pathlib.Path] = []
         src_idx = 0
 
         for kind, val in link_items:
@@ -1739,14 +1847,37 @@ def run_emscripten_cc_driver(argv: List[str], is_cxx: bool) -> int:
             elif kind == "obj":
                 if ctx.is_shared_x11_archive_path(val):
                     continue
+                if not is_shared and ctx.shared_port_archive_stem(val) is not None:
+                    rp = pathlib.Path(val).resolve()
+                    if rp not in deferred_shared_archives:
+                        deferred_shared_archives.append(rp)
+                    continue
                 ld_inputs.append(val)
+            elif kind == "la_dep_obj":
+                if ctx.is_shared_x11_archive_path(val):
+                    continue
+                if not is_shared and ctx.shared_port_archive_stem(val) is not None:
+                    rp = pathlib.Path(val).resolve()
+                    if rp not in deferred_shared_archives:
+                        deferred_shared_archives.append(rp)
+            elif kind == "la_dep_lib":
+                resolved_ar, ok = resolve_library(ctx, val, lib_dirs, ctx.stage_dir / "usr/local/lib")
+                if ok and resolved_ar is not None and not is_shared and ctx.shared_port_archive_stem(resolved_ar) is not None:
+                    rp = pathlib.Path(resolved_ar).resolve()
+                    if rp not in deferred_shared_archives:
+                        deferred_shared_archives.append(rp)
             elif kind == "lib":
                 resolved_ar, ok = resolve_library(ctx, val, lib_dirs, ctx.stage_dir / "usr/local/lib")
                 if not ok:
                     sys.stderr.write(f"obsd-ld: error: unable to find library -l{val}\n")
                     return 1
-                if resolved_ar is not None and resolved_ar not in ld_inputs:
-                    ld_inputs.append(resolved_ar)
+                if resolved_ar is not None:
+                    if not is_shared and ctx.shared_port_archive_stem(resolved_ar) is not None:
+                        rp = pathlib.Path(resolved_ar).resolve()
+                        if rp not in deferred_shared_archives:
+                            deferred_shared_archives.append(rp)
+                    elif resolved_ar not in ld_inputs:
+                        ld_inputs.append(resolved_ar)
             elif kind == "ldflag":
                 ld_extra_flags.append(val)
 
@@ -1788,7 +1919,7 @@ def run_emscripten_cc_driver(argv: List[str], is_cxx: bool) -> int:
             if init_rc != 0:
                 tmp_linked.unlink(missing_ok=True)
                 return init_rc
-            missing_syms = verify_undefined_symbols(ctx, tmp_linked)
+            missing_syms = verify_undefined_symbols(ctx, tmp_linked, deferred_shared_archives)
             if missing_syms:
                 tmp_linked.unlink(missing_ok=True)
                 for sym in missing_syms[:25]:

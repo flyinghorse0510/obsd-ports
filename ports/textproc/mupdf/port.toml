@@ -9,13 +9,19 @@ pre_configure = [
 
 build_cmd = [
     "gmake -j\"$JOBS\" CC=\"$CC\" CXX=\"$CXX\" AR=\"$AR\" CC_FOR_BUILD=clang USE_SYSTEM_LIBS=no shared=no build=release HAVE_OBJCOPY=no HAVE_GLUT=no HAVE_CURL=no HAVE_LEPTONICA=no HAVE_TESSERACT=no HAVE_MUJS=no mujs=no HAVE_X11=yes X11_CFLAGS=\"-I/usr/X11R6/include\" X11_LIBS=\"-L/usr/X11R6/lib -lX11 -lXext -lXrandr\" SYS_X11_CFLAGS=\"-I/usr/X11R6/include\" SYS_X11_LIBS=\"-L/usr/X11R6/lib -lX11 -lXext -lXrandr\" XCFLAGS=\"$CFLAGS -I/usr/X11R6/include\" LDFLAGS=\"$LDFLAGS -L/usr/X11R6/lib\" prefix=/usr/local mandir=/usr/local/man build/release/mutool build/release/mupdf-x11",
+    "printf '%s\\n' '#include <string.h>' 'int mupdf_x11_app_main(int argc, char **argv);' 'int mutool_app_main(int argc, char **argv);' 'int main(int argc, char **argv) {' '    const char *p = (argc > 0 && argv && argv[0]) ? argv[0] : \"mupdf\";' '    const char *b = strrchr(p, 47);' '    b = b ? (b + 1) : p;' '    return (strcmp(b, \"mutool\") == 0) ? mutool_app_main(argc, argv) : mupdf_x11_app_main(argc, argv);' '}' > \"$WRKSRC/build/release/mupdf_multicall.c\"",
+    "$CC $CFLAGS -DNDEBUG -DHAVE_PTHREAD -DFZ_ENABLE_JS=0 -I\"$WRKSRC/include\" -I\"$WRKSRC/platform/x11\" -I/usr/X11R6/include -Dmain=mupdf_x11_app_main -c \"$WRKSRC/platform/x11/x11_main.c\" -o \"$WRKSRC/build/release/x11_main_mc.o\"",
+    "$CC $CFLAGS -DNDEBUG -DHAVE_PTHREAD -DFZ_ENABLE_JS=0 -I\"$WRKSRC/include\" -Dmain=mutool_app_main -c \"$WRKSRC/source/tools/mutool.c\" -o \"$WRKSRC/build/release/mutool_mc.o\"",
+    "$CC $CFLAGS -DNDEBUG -c \"$WRKSRC/build/release/mupdf_multicall.c\" -o \"$WRKSRC/build/release/mupdf_multicall.o\"",
+    "tool_objs=$(find \"$WRKSRC/build/release/source/tools\" -maxdepth 1 -name '*.o' ! -name 'mutool.o' ! -name 'muraster.o' | sort) && $CC $LDFLAGS -L/usr/X11R6/lib -o \"$WRKSRC/build/release/mupdf-x11\" \"$WRKSRC/build/release/mupdf_multicall.o\" \"$WRKSRC/build/release/x11_main_mc.o\" \"$WRKSRC/build/release/platform/x11/pdfapp.o\" \"$WRKSRC/build/release/platform/x11/x11_image.o\" \"$WRKSRC/build/release/mutool_mc.o\" $tool_objs \"$WRKSRC/build/release/libmupdf.a\" \"$WRKSRC/build/release/libmupdf-third.a\" \"$WRKSRC/build/release/libmupdf-pkcs7.a\" \"$WRKSRC/build/release/libmupdf-threads.a\" -lX11 -lXext -lXrandr -lcrypto -lpthread -lm",
+    "rm -f \"$WRKSRC/build/release/mutool\"",
 ]
 
 install_cmd = [
     "install -d -m 0755 \"$STAGE_DIR/usr/local/bin\" \"$STAGE_DIR/usr/local/man/man1\" \"$STAGE_DIR/usr/local/share/pixmaps\"",
     "install -c -m 0755 \"$WRKSRC/build/release/mupdf-x11\" \"$STAGE_DIR/usr/local/bin/mupdf-x11\"",
     "ln -sf mupdf-x11 \"$STAGE_DIR/usr/local/bin/mupdf\"",
-    "install -c -m 0755 \"$WRKSRC/build/release/mutool\" \"$STAGE_DIR/usr/local/bin/mutool\"",
+    "ln -sf mupdf-x11 \"$STAGE_DIR/usr/local/bin/mutool\"",
     "install -c -m 0444 \"$WRKSRC/docs/man/mupdf.1\" \"$WRKSRC/docs/man/mutool.1\" \"$STAGE_DIR/usr/local/man/man1/\"",
     "if [ -f \"$VENDOR_PORT_DIR/files/mupdf.xpm\" ]; then install -c -m 0644 \"$VENDOR_PORT_DIR/files/mupdf.xpm\" \"$STAGE_DIR/usr/local/share/pixmaps/mupdf.xpm\"; fi",
     "find \"$WRKSRC/build\" -name '*.exe' -delete || true",
@@ -27,9 +33,5 @@ binary = "/usr/local/bin/mupdf-x11"
 paths = [
     "/usr/local/bin/mupdf-x11",
     "/usr/local/bin/mupdf",
+    "/usr/local/bin/mutool",
 ]
-
-[[applets]]
-sym = "mutool"
-binary = "/usr/local/bin/mutool"
-paths = ["/usr/local/bin/mutool"]
