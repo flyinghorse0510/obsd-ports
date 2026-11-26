@@ -760,6 +760,11 @@ def build_and_cache_test_runtime(
         env=link_env,
         check=True,
     )
+    mjs_txt = runtime_mjs.read_text(encoding="utf-8")
+    old_async = '(raw["asyncify_get_state"]||wasmExports["asyncify_get_state"])()'
+    new_async = '(raw["asyncify_get_state"]||wasmExports["asyncify_get_state"]||(()=>typeof Asyncify!=="undefined"?Asyncify.state:0))()'
+    if old_async in mjs_txt:
+        runtime_mjs.write_text(mjs_txt.replace(old_async, new_async), encoding="utf-8")
     stamp_file.write_text(sig + "\n", encoding="utf-8")
     return runtime_mjs, table_tsv, find_node(obsd_root)
 
