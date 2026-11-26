@@ -725,83 +725,41 @@ def build_and_cache_test_runtime(
         '"_ports_wait_status","_ports_embed_error"]'
     )
     exported_rt = '["FS","HEAPU8","wasmMemory"]'
-    host_ram_mib = 0
-    try:
-        if os.path.isfile("/proc/meminfo"):
-            with open("/proc/meminfo", encoding="utf-8") as fp:
-                for ln in fp:
-                    if ln.startswith("MemTotal:"):
-                        host_ram_mib = int(ln.split()[1]) // 1024
-                        break
-        else:
-            for skey in ("hw.memsize", "hw.physmem64", "hw.physmem"):
-                sp = subprocess.run(["sysctl", "-n", skey], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-                if sp.returncode == 0 and sp.stdout.strip().isdigit():
-                    host_ram_mib = int(sp.stdout.strip()) // (1024 * 1024)
-                    if host_ram_mib > 0:
-                        break
-    except OSError:
-        host_ram_mib = 0
-
-    link_opt = os.environ.get("SONVORI_WASM_LINK_OPT", "").strip() or (
-        "-O2" if (not port_rows or host_ram_mib >= 49152) else "-Oz"
-    )
-    link_cmd = [
-        str(emcc),
-        "-m64",
-        "-pthread",
-        link_opt,
-        "--profiling-funcs",
-        "-Wno-pthreads-mem-growth",
-        "-Wl,--wrap=posix_memalign",
-        "-sMODULARIZE=1",
-        "-sEXPORT_ES6=1",
-        "-sENVIRONMENT=node",
-        "-sALLOW_MEMORY_GROWTH=1",
-        "-sINITIAL_MEMORY=536870912",
-        "-sMAXIMUM_MEMORY=4294967296",
-        "-sSTACK_SIZE=1048576",
-        "-sPTHREAD_POOL_SIZE=64",
-        "-sEXIT_RUNTIME=0",
-        f"-sEXPORTED_FUNCTIONS={exported_fns}",
-        f"-sEXPORTED_RUNTIME_METHODS={exported_rt}",
-        *extra_ldflags,
-        str(host_o),
-        str(table_o),
-        str(guest_o),
-        str(host_ar),
-        "-o",
-        str(runtime_mjs),
-    ]
-    scope_mode = os.environ.get("SONVORI_WASM_CGROUP_SCOPE", "auto").strip().lower()
-    systemd_run = shutil.which("systemd-run")
-    if (
-        scope_mode not in ("0", "off", "false", "no")
-        and systemd_run
-        and subprocess.run([systemd_run, "--user", "--scope", "true"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
-    ):
-        mem_max = os.environ.get("SONVORI_WASM_MEMORY_MAX", "").strip()
-        if not mem_max and host_ram_mib > 0:
-            headroom = max(4096, host_ram_mib * 20 // 100)
-            cap_mib = max(8192, min(host_ram_mib * 75 // 100, host_ram_mib - headroom))
-            mem_max = f"{cap_mib}M"
-        if mem_max:
-            scope_cmd = [systemd_run, "--user", "--scope", "-p", f"MemoryMax={mem_max}"]
-            swap_max = os.environ.get("SONVORI_WASM_SWAP_MAX", "").strip()
-            if not swap_max and host_ram_mib > 0:
-                swap_max = f"{min(4096, max(512, host_ram_mib // 16))}M"
-            if swap_max:
-                scope_cmd.extend(["-p", f"MemorySwapMax={swap_max}"])
-            link_cmd = [*scope_cmd, *link_cmd]
+    link_opt = os.environ.get("SONVORI_WASM_LINK_OPT", "-Oz").strip() or "-Oz"
     link_env = dict(os.environ)
     if not link_env.get("BINARYEN_CORES"):
-        ncpu = os.cpu_count() or 8
-        if host_ram_mib > 0:
-            ram_cores = max(2, ((host_ram_mib + 512) // 1024) // 4)
-            link_env["BINARYEN_CORES"] = str(min(ncpu, ram_cores))
-        else:
-            link_env["BINARYEN_CORES"] = str(ncpu)
-    subprocess.run(link_cmd, env=link_env, check=True)
+        link_env["BINARYEN_CORES"] = str(os.cpu_count() or 8)
+    subprocess.run(
+        [
+            str(emcc),
+            "-m64",
+            "-pthread",
+            link_opt,
+            "--profiling-funcs",
+            "-Wno-pthreads-mem-growth",
+            "-Wl,--wrap=posix_memalign",
+            "-sMODULARIZE=1",
+            "-sEXPORT_ES6=1",
+            "-sENVIRONMENT=node",
+            "-sALLOW_MEMORY_GROWTH=1",
+            "-sINITIAL_MEMORY=536870912",
+            "-sMAXIMUM_MEMORY=4294967296",
+            "-sSTACK_SIZE=1048576",
+            "-sPTHREAD_POOL_SIZE=64",
+            "-sEXIT_RUNTIME=0",
+            f"-sEXPORTED_FUNCTIONS={exported_fns}",
+            f"-sEXPORTED_RUNTIME_METHODS={exported_rt}",
+            *extra_ldflags,
+            str(host_o),
+            str(table_o),
+            str(guest_o),
+            str(host_ar),
+            "-o",
+            str(runtime_mjs),
+        ],
+        env=link_env,
+        check=True,
+    )
     stamp_file.write_text(sig + "\n", encoding="utf-8")
     return runtime_mjs, table_tsv, find_node(obsd_root)
 
